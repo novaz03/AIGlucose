@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from textwrap import dedent
 
-from .models import FoodAnalysisResponse, QuestionEvaluation
+from .models import FoodAnalysisResponse, ProfileUpdateResponse, QuestionEvaluation
 
 
 LLM_STUDIO_RESPONSE_SCHEMA = json.dumps(
@@ -16,6 +16,12 @@ LLM_STUDIO_RESPONSE_SCHEMA = json.dumps(
 
 QUESTION_EVALUATION_SCHEMA = json.dumps(
     QuestionEvaluation.model_json_schema(),
+    indent=2,
+)
+
+
+PROFILE_UPDATE_SCHEMA = json.dumps(
+    ProfileUpdateResponse.model_json_schema(),
     indent=2,
 )
 
@@ -122,6 +128,47 @@ def build_input_validation_prompts(
         - Question prompt: {question_prompt}
         - This question is {requirement_label}.
         - User answer (verbatim): {answer_literal}
+
+        Provide only JSON.
+        """
+    ).strip()
+
+    return system_prompt, user_prompt
+
+
+def build_profile_update_prompts(*, profile_json: str, user_request: str | None = None) -> tuple[str, str]:
+    system_prompt = dedent(
+        """
+        You help users update their diabetes health profile. Always reply with JSON
+        that matches the provided schema. Do not include any text outside of JSON.
+        """
+    ).strip()
+
+    user_request_literal = json.dumps(user_request or "")
+
+    user_prompt = dedent(
+        f"""
+        You must output JSON that conforms to this schema:
+
+        {PROFILE_UPDATE_SCHEMA}
+
+        Specialisation:
+        - Use the following existing profile data as context when evaluating updates:
+
+          {profile_json}
+
+        - When the user supplies update instructions, interpret them and provide
+          structured updates in the "updates" list.
+
+        - Each entry must set "question" to one of: age, gender, weight,
+          height, underlying_disease, race, activity_level.
+
+        - Include "accepted_value" when the change is reasonable. Leave it null
+          if you need more information.
+
+        - The explanation must be concise (under 120 characters).
+
+        User's update request (verbatim): {user_request_literal}
 
         Provide only JSON.
         """

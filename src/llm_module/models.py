@@ -176,3 +176,23 @@ class QuestionEvaluation(BaseModel):
     )
 
 
+class ProfileUpdateItem(BaseModel):
+    """Single field update returned from a profile revision prompt."""
+
+    question: str = Field(..., description="Profile field identifier to update")
+    accepted_value: Optional[str] = Field(
+        None,
+        description="Cleaned value proposed for the profile field.",
+    )
+    explanation: Optional[str] = Field(
+        None,
+        description="Short rationale describing the change or missing data.",
+    )
+
+
+class ProfileUpdateResponse(BaseModel):
+    """Array wrapper describing proposed profile updates."""
+
+    updates: List[ProfileUpdateItem] = Field(default_factory=list)
+
+

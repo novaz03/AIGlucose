@@ -163,7 +163,7 @@ class StubClient:
         return self.payload
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_continue_query_accepts_llm_validation(tmp_path):
     query = AIQuery(101, storage_dir=tmp_path)
     prompt = await query.QueryBody()
@@ -187,7 +187,7 @@ async def test_continue_query_accepts_llm_validation(tmp_path):
     assert query._retry_message is None
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_continue_query_requests_retry_when_llm_flags_issue(tmp_path):
     query = AIQuery(102, storage_dir=tmp_path)
     await query.QueryBody()
@@ -214,7 +214,7 @@ async def test_continue_query_requests_retry_when_llm_flags_issue(tmp_path):
     assert "positive whole number" in follow_up
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_continue_query_uses_deterministic_validation_before_llm(tmp_path):
     query = AIQuery(103, storage_dir=tmp_path)
     await query.QueryBody()
@@ -231,7 +231,7 @@ async def test_continue_query_uses_deterministic_validation_before_llm(tmp_path)
     assert query._retry_message == "Age must be a positive number."
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_continue_query_falls_back_when_llm_errors_optional(tmp_path):
     query = AIQuery(104, storage_dir=tmp_path)
     query._current_question = (
