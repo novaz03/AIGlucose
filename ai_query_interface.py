@@ -123,6 +123,12 @@ class AIQuery:
             return self._active
 
         normalized = value if value else ""
+        if key in {"age", "gender", "weight", "height"}:
+            is_valid, normalized_value, error_message = self._validate_answer(key, value)
+            if not is_valid:
+                self._retry_message = error_message
+                return self._active
+            normalized = normalized_value
         if q_type == "health":
             self._health_answers.append(normalized)
         else:
@@ -286,3 +292,43 @@ class AIQuery:
         self._message_queue.append(
             "Using your saved health profile. Let me know if anything has changed."
         )
+
+    def _validate_answer(self, key: str, value: str) -> tuple[bool, str, str]:
+        if not value:
+            field_label = key.replace("_", " ")
+            return False, "", f"Please provide your {field_label}."
+
+        if key == "age":
+            try:
+                age = int(value)
+            except ValueError:
+                return False, "", "Please enter your age as a whole number (e.g., 34)."
+            if age <= 0:
+                return False, "", "Age must be a positive number."
+            return True, str(age), ""
+
+        if key == "weight":
+            try:
+                weight = float(value)
+            except ValueError:
+                return False, "", "Please enter your weight as a number (e.g., 72.5)."
+            if weight <= 0:
+                return False, "", "Weight must be a positive number."
+            return True, f"{weight:.2f}", ""
+
+        if key == "height":
+            try:
+                height = float(value)
+            except ValueError:
+                return False, "", "Please enter your height as a number (e.g., 175 or 175.5)."
+            if height <= 0:
+                return False, "", "Height must be a positive number."
+            return True, f"{height:.2f}", ""
+
+        if key == "gender":
+            has_alpha = any(ch.isalpha() for ch in value)
+            if not has_alpha:
+                return False, "", "Please enter your gender using letters (e.g., Male, Female)."
+            return True, value, ""
+
+        return True, value, ""
