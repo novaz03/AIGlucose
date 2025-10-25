@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from textwrap import dedent
 
-from .models import StructuredMealResponse
+from .models import FoodAnalysisResponse
 
 
 LLM_STUDIO_RESPONSE_SCHEMA = json.dumps(
-    StructuredMealResponse.model_json_schema(),
+    FoodAnalysisResponse.model_json_schema(),
     indent=2,
 )
 

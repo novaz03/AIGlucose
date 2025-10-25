@@ -10,5 +10,6 @@ class PredictionModel:
     """
 
     async def predict(self, payload: Any) -> str:
+        """Return a mock prediction summarizing the payload."""
         await asyncio.sleep(0.1)
         return f"[Mock Prediction] Received payload: {payload}"

@@ -9,10 +9,8 @@ from llm_module import (
     HealthInfo,
     HealthInfoRepository,
     LLMRequestContext,
-    StructuredMealResponse,
     create_client,
     create_session_manager,
-    recommend_meal,
 )
 
 
@@ -39,22 +37,13 @@ def main() -> None:
     backend = InMemoryBackend()
     repository = HealthInfoRepository(load=backend.load, save=backend.save)
 
-    client = create_client(
-        "lmstudio",
-    )
+    client = create_client("lmstudio")
 
     session_manager = create_session_manager(prompts=prompts, repository=repository)
 
-    request_context = LLMRequestContext(model_name="local-model")
+    request_context = LLMRequestContext(model_name="gpt-oss-20b")
 
-    response: StructuredMealResponse = recommend_meal(
-        client=client,
-        session_manager=session_manager,
-        prompts=prompts,
-        request_context=request_context,
-    )
-
-    print(response.json(indent=2))
+    print("Example usage requires an AIQuery integration and active pipeline.")
 
 
 if __name__ == "__main__":

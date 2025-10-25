@@ -7,11 +7,12 @@ from typing import Optional
 from .clients import LLMClientBase, StructuredResponseParser, default_parser
 from .models import (
     ConversationPrompts,
+    FoodAnalysisResponse,
+    FoodAnalysisResult,
     HealthInfo,
     HealthInfoRepository,
     LLMRequestContext,
     MealIntent,
-    StructuredMealResponse,
     UserContext,
 )
 from .responses import (
@@ -19,7 +20,13 @@ from .responses import (
     build_system_prompt,
     build_user_prompt,
 )
-from .workflow import HealthSessionManager, LLMOrchestrator, collect_user_context
+from .workflow import (
+    HealthSessionManager,
+    LLMOrchestrator,
+    collect_user_context,
+    ensure_user_health_profile,
+    run_food_analysis_pipeline,
+)
 
 
 def create_client(
@@ -69,25 +76,10 @@ def create_session_manager(
     return HealthSessionManager(prompts=prompts, repository=repository)
 
 
-def recommend_meal(
-    *,
-    client: LLMClientBase,
-    session_manager: HealthSessionManager,
-    prompts: ConversationPrompts,
-    request_context: LLMRequestContext,
-) -> StructuredMealResponse:
-    """High-level helper that runs the recommendation workflow."""
-
-    orchestrator = LLMOrchestrator(client=client)
-    return orchestrator.recommend_meal(
-        session_manager=session_manager,
-        prompts=prompts,
-        request_context=request_context,
-    )
-
-
 __all__ = [
     "ConversationPrompts",
+    "FoodAnalysisResponse",
+    "FoodAnalysisResult",
     "HealthInfo",
     "HealthInfoRepository",
     "HealthSessionManager",
@@ -96,7 +88,6 @@ __all__ = [
     "LLM_STUDIO_RESPONSE_SCHEMA",
     "LLMOrchestrator",
     "MealIntent",
-    "StructuredMealResponse",
     "UserContext",
     "build_system_prompt",
     "build_user_prompt",
@@ -104,6 +95,7 @@ __all__ = [
     "create_client",
     "create_session_manager",
     "default_parser",
-    "recommend_meal",
+    "ensure_user_health_profile",
+    "run_food_analysis_pipeline",
 ]
 

@@ -6,7 +6,7 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
-from .models import LLMRequestContext, StructuredMealResponse
+from .models import FoodAnalysisResponse, LLMRequestContext
 
 
 class LLMClientError(RuntimeError):
@@ -17,8 +17,8 @@ class LLMClientError(RuntimeError):
 class StructuredResponseParser(Protocol):
     """Protocol for parsing raw LLM output into structured responses."""
 
-    def parse(self, raw_output: str) -> StructuredMealResponse:
-        """Convert raw JSON string to `StructuredMealResponse`."""
+    def parse(self, raw_output: str) -> FoodAnalysisResponse:
+        """Convert raw JSON string to `FoodAnalysisResponse`."""
 
 
 class LLMClientBase(ABC):
@@ -43,7 +43,7 @@ class LLMClientBase(ABC):
         prompt: str,
         request_context: LLMRequestContext,
         system_prompt: Optional[str] = None,
-    ) -> StructuredMealResponse:
+    ) -> FoodAnalysisResponse:
         """Execute the completion and parse the structured response."""
 
         raw_output = self.complete(
@@ -62,13 +62,13 @@ def default_parser() -> StructuredResponseParser:
     """Return a parser that expects a JSON string in the final message."""
 
     class _Parser:
-        def parse(self, raw_output: str) -> StructuredMealResponse:  # noqa: D401
+        def parse(self, raw_output: str) -> FoodAnalysisResponse:  # noqa: D401
             try:
                 payload: Dict[str, Any] = json.loads(raw_output)
             except json.JSONDecodeError as exc:  # pragma: no cover - defensive
                 raise ValueError(f"Expected JSON string from LLM, received: {raw_output}") from exc
 
-            return StructuredMealResponse.parse_obj(payload)
+            return FoodAnalysisResponse.parse_obj(payload)
 
     return _Parser()
 

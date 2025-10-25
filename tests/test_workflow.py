@@ -11,11 +11,10 @@ from llm_module import (
     HealthInfoRepository,
     LLMOrchestrator,
     LLMRequestContext,
-    StructuredMealResponse,
     collect_user_context,
     create_session_manager,
 )
-from llm_module.models import HealthInfo
+from llm_module.models import FoodAnalysisResponse, HealthInfo
 
 
 @dataclass
@@ -26,7 +25,7 @@ class DummyClient:
         assert "schema" in prompt.lower()
         assert system_prompt
         assert isinstance(request_context, LLMRequestContext)
-        return StructuredMealResponse.parse_raw(self.response)
+        return FoodAnalysisResponse.parse_raw(self.response)
 
 
 class DummyPrompts:
@@ -59,8 +58,17 @@ class DummyRepo:
 
 def test_collect_user_context_prompts_for_missing_health_info():
     dummy_prompts = DummyPrompts(
-        health_answers=["30", "70", "180", "type 1", "insulin", "nuts", "vegan"],
-        meal_answers=["120", "oatmeal", "breakfast", "Feeling good"],
+        health_answers=[
+            "30",
+            "female",
+            "70",
+            "180",
+            "type 1",
+            "insulin",
+            "nuts",
+            "vegan",
+        ],
+        meal_answers=["120", "oatmeal", "1 cup", "breakfast", "Feeling good"],
     )
     prompts = ConversationPrompts(
         ask_health_info=dummy_prompts.ask_health_info,
@@ -81,20 +89,28 @@ def test_collect_user_context_prompts_for_missing_health_info():
 def test_orchestrator_returns_structured_response():
     sample_response = json.dumps(
         {
-            "food_type": "balanced",
-            "recommended_items": [
-                {
-                    "name": "Greek yogurt",
-                    "food_type": "protein",
-                }
-            ],
-            "health_summary": "Balanced choice",
-            "guidance": {},
+            "food_analysis": {
+                "food_name": "Greek yogurt",
+                "portion_weight_g": 150,
+                "portion_description": "1 bowl",
+                "ingredients": [
+                    {"name": "Yogurt", "amount_g": 120},
+                    {"name": "Honey", "amount_g": 20},
+                    {"name": "Walnuts", "amount_g": 10},
+                ],
+            },
+            "notes": "Example analysis",
         }
     )
 
     dummy_repo = DummyRepo(
-        initial=HealthInfo(age=30, weight_kg=70.0, height_cm=180.0),
+        initial=HealthInfo(
+            age=30,
+            gender="male",
+            weight_kg=70.0,
+            height_cm=180.0,
+            underlying_disease="type 1 diabetes",
+        ),
     )
     repo = HealthInfoRepository(load=dummy_repo.load, save=dummy_repo.save)
     prompts = ConversationPrompts(
@@ -114,6 +130,6 @@ def test_orchestrator_returns_structured_response():
         request_context=LLMRequestContext(model_name="dummy"),
     )
 
-    assert isinstance(result, StructuredMealResponse)
-    assert result.food_type == "balanced"
+    assert isinstance(result, FoodAnalysisResponse)
+    assert result.food.food_name == "Greek yogurt"
 

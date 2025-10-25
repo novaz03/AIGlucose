@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import json
-from typing import Optional
+from pathlib import Path
+from typing import Any, Callable, Optional, Tuple
 
 from .clients import LLMClientBase
 from .models import (
     ConversationPrompts,
+    FoodAnalysisResponse,
+    FoodAnalysisResult,
     HealthInfo,
     HealthInfoRepository,
     LLMRequestContext,
     MealIntent,
-    StructuredMealResponse,
     UserContext,
 )
 from .responses import build_system_prompt, build_user_prompt
@@ -46,35 +48,74 @@ class HealthSessionManager:
         """Ensure health info exists, prompting user if needed."""
 
         existing = self.load()
-        if existing:
+        if existing and _has_required_health_fields(existing):
             return existing
 
         self._prompts.notify("We need some health details to personalise guidance.")
 
-        age_raw = self._prompts.ask_health_info("What is your age in years?")
-        weight_raw = self._prompts.ask_health_info("What is your current weight in kg?")
-        height_raw = self._prompts.ask_health_info("What is your height in cm?")
-        diabetes_type = self._prompts.ask_health_info(
-            "What type of diabetes or metabolic condition do you have?"
+        def _ask_optional(prompt: str, existing_value: Optional[str]) -> Optional[str]:
+            if existing_value:
+                return existing_value
+            return _safe_str(self._prompts.ask_health_info(prompt))
+
+        existing_data = existing or HealthInfo()
+
+        age = _collect_required_value(
+            existing_value=existing_data.age,
+            question="What is your age in years?",
+            parser=_safe_int,
+            prompts=self._prompts,
+            retry_message="Please provide your age as a number in years.",
         )
-        medications_raw = self._prompts.ask_health_info(
-            "List any current medications (comma separated)."
+        gender = _collect_required_value(
+            existing_value=existing_data.gender,
+            question="What is your gender?",
+            parser=_safe_str,
+            prompts=self._prompts,
+            retry_message="Please share your gender so I can personalise guidance.",
         )
-        allergies_raw = self._prompts.ask_health_info(
-            "List any allergies (comma separated)."
+        weight = _collect_required_value(
+            existing_value=existing_data.weight_kg,
+            question="What is your current weight in kilograms?",
+            parser=_safe_float,
+            prompts=self._prompts,
+            retry_message="Please provide your weight in kilograms.",
         )
-        preferences_raw = self._prompts.ask_health_info(
-            "List any dietary preferences or restrictions (comma separated)."
+        height = _collect_required_value(
+            existing_value=existing_data.height_cm,
+            question="What is your height in centimetres?",
+            parser=_safe_float,
+            prompts=self._prompts,
+            retry_message="Please provide your height in centimetres.",
+        )
+        disease = _collect_required_value(
+            existing_value=existing_data.underlying_disease,
+            question="What underlying disease or type of diabetes do you have?",
+            parser=_safe_str,
+            prompts=self._prompts,
+            retry_message="I need to know your underlying condition to proceed.",
+        )
+
+        race = _ask_optional(
+            "How would you describe your race or ethnicity?",
+            existing_data.race,
+        )
+        activity = _ask_optional(
+            "How would you describe your recent exercise or activity level?",
+            existing_data.activity_level,
         )
 
         health_info = HealthInfo(
-            age=_safe_int(age_raw),
-            weight_kg=_safe_float(weight_raw),
-            height_cm=_safe_float(height_raw),
-            diabetes_type=_safe_str(diabetes_type),
-            medications=_split_list(medications_raw),
-            allergies=_split_list(allergies_raw),
-            dietary_preferences=_split_list(preferences_raw),
+            age=age,
+            gender=gender,
+            weight_kg=weight,
+            height_cm=height,
+            underlying_disease=disease,
+            race=race,
+            activity_level=activity,
+            medications=existing_data.medications,
+            allergies=existing_data.allergies,
+            dietary_preferences=existing_data.dietary_preferences,
         )
 
         self._repository.save(health_info)
@@ -88,13 +129,13 @@ class LLMOrchestrator:
     def __init__(self, *, client: LLMClientBase) -> None:
         self._client = client
 
-    def recommend_meal(
+    def request_food_breakdown(
         self,
         *,
         session_manager: HealthSessionManager,
         prompts: ConversationPrompts,
         request_context: LLMRequestContext,
-    ) -> StructuredMealResponse:
+    ) -> FoodAnalysisResponse:
         """Collect user context and fetch structured response from the LLM."""
 
         user_context = collect_user_context(
@@ -128,6 +169,9 @@ def collect_user_context(
     desired_food = prompts.ask_meal_intent(
         "What food or meal are you considering right now?"
     )
+    portion = prompts.ask_meal_intent(
+        "How much of that food do you plan to eat (portion size or quantity)?"
+    )
     timeframe = prompts.ask_meal_intent(
         "When do you plan to eat it?"
     )
@@ -140,15 +184,93 @@ def collect_user_context(
         desired_food=_safe_str(desired_food),
         meal_timeframe=_safe_str(timeframe),
         additional_notes=_safe_str(notes),
+        portion_size_description=_safe_str(portion),
     )
 
     return UserContext(health_info=health_info, meal_intent=meal_intent)
 
 
-def _split_list(raw: Optional[str]) -> list[str]:
-    if not raw:
-        return []
-    return [item.strip() for item in raw.split(",") if item.strip()]
+def ensure_user_health_profile(
+    *, user_id: int, storage_dir: Path
+) -> Tuple[HealthInfoRepository, Callable[[HealthInfo], None]]:
+    """Create repository bound to the user's persisted health profile."""
+
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    profile_path = storage_dir / f"{user_id}.json"
+
+    def load() -> Optional[HealthInfo]:
+        if not profile_path.exists():
+            initial_payload = {
+                "age": None,
+                "gender": None,
+                "weight_kg": None,
+                "height_cm": None,
+                "underlying_disease": None,
+                "race": None,
+                "activity_level": None,
+                "medications": [],
+                "allergies": [],
+                "dietary_preferences": [],
+            }
+            with profile_path.open("w", encoding="utf-8") as fh:
+                json.dump(initial_payload, fh, indent=2)
+            return HealthInfo.parse_obj(initial_payload)
+        with profile_path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return HealthInfo.parse_obj(data)
+
+    def save(health_info: HealthInfo) -> None:
+        payload = json.loads(health_info.model_dump_json(indent=2, exclude_none=False))
+        with profile_path.open("w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2)
+
+    repo = HealthInfoRepository(load=load, save=save)
+    return repo, save
+
+
+def run_food_analysis_pipeline(
+    *,
+    ai_query,
+    client: LLMClientBase,
+    prompts: ConversationPrompts,
+    request_context: LLMRequestContext,
+    storage_dir: Path,
+) -> dict[str, Any]:
+    """Main pipeline orchestrating profile collection and food analysis."""
+
+    repo, _ = ensure_user_health_profile(user_id=ai_query.user_id, storage_dir=storage_dir)
+    session_manager = HealthSessionManager(prompts=prompts, repository=repo)
+
+    health_info = session_manager.ensure_health_info()
+
+    if not _has_required_health_fields(health_info):
+        missing = _missing_health_fields(health_info)
+        prompts.notify(
+            "Missing required health information: " + ", ".join(missing)
+        )
+        raise ValueError("Required health parameters not provided.")
+
+    prompts.notify("Analysing your data and getting a recommendation now.")
+
+    user_context = collect_user_context(session_manager=session_manager, prompts=prompts)
+
+    orchestrator = LLMOrchestrator(client=client)
+    response = orchestrator.request_food_breakdown(
+        session_manager=session_manager,
+        prompts=prompts,
+        request_context=request_context,
+    )
+
+    result = FoodAnalysisResult(
+        health_parameters=user_context.health_info,
+        food=response.food,
+        notes=response.notes,
+    )
+    result_payload = result.model_dump(exclude_none=True)
+    ai_query.store_pipeline_result(result_payload)
+    ai_query.stop()
+
+    return result_payload
 
 
 def _safe_float(raw: Optional[str]) -> Optional[float]:
@@ -182,9 +304,45 @@ def _safe_str(raw: Optional[str]) -> Optional[str]:
     return value or None
 
 
+def _has_required_health_fields(health_info: HealthInfo) -> bool:
+    return all(
+        getattr(health_info, field) is not None
+        for field in ("age", "gender", "weight_kg", "height_cm", "underlying_disease")
+    )
+
+
+def _missing_health_fields(health_info: HealthInfo) -> list[str]:
+    return [
+        field
+        for field in ("age", "gender", "weight_kg", "height_cm", "underlying_disease")
+        if getattr(health_info, field) is None
+    ]
+
+
+def _collect_required_value(
+    *,
+    existing_value: Optional[Any],
+    question: str,
+    parser: Callable[[Optional[str]], Optional[Any]],
+    prompts: ConversationPrompts,
+    retry_message: str,
+) -> Any:
+    if existing_value is not None:
+        return existing_value
+
+    while True:
+        raw = prompts.ask_health_info(question)
+        parsed = parser(raw)
+        if parsed is not None:
+            return parsed
+        prompts.notify(retry_message)
+
+
 __all__ = [
     "HealthSessionManager",
     "LLMOrchestrator",
     "collect_user_context",
+    "ensure_user_health_profile",
+    "run_food_analysis_pipeline",
 ]
 

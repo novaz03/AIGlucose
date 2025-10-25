@@ -12,15 +12,22 @@ class HealthInfo(BaseModel):
     """Structured representation of the user's health information."""
 
     age: Optional[int] = Field(None, ge=0, description="Age in years")
+    gender: Optional[str] = Field(None, description="Gender identity")
     weight_kg: Optional[float] = Field(
         None, gt=0, description="Body weight in kilograms"
     )
     height_cm: Optional[float] = Field(
         None, gt=0, description="Body height in centimetres"
     )
-    diabetes_type: Optional[str] = Field(
+    underlying_disease: Optional[str] = Field(
         None,
-        description="Diabetes classification or metabolic condition (e.g. type 1, type 2)",
+        description="Underlying metabolic diseases such as type of diabetes",
+    )
+    race: Optional[str] = Field(
+        None, description="User reported race or ethnicity"
+    )
+    activity_level: Optional[str] = Field(
+        None, description="Recent exercise or activity level"
     )
     medications: List[str] = Field(default_factory=list)
     allergies: List[str] = Field(default_factory=list)
@@ -53,6 +60,9 @@ class MealIntent(BaseModel):
     additional_notes: Optional[str] = Field(
         None, description="Free-form notes such as activity level or symptoms"
     )
+    portion_size_description: Optional[str] = Field(
+        None, description="User reported portion size or quantity"
+    )
 
 
 class UserContext(BaseModel):
@@ -62,57 +72,52 @@ class UserContext(BaseModel):
     meal_intent: MealIntent
 
 
-class FoodItemSuggestion(BaseModel):
-    """Single food recommendation entry produced by the LLM."""
+class FoodIngredient(BaseModel):
+    """Ingredient detail for a specific food item."""
 
-    name: str = Field(..., description="Recommended food item")
-    food_type: Optional[str] = Field(
-        None, description="Classification such as carbs, protein, beverage"
-    )
-    portion_size: Optional[str] = Field(
-        None, description="Suggested serving size (e.g. 1 cup, 50g)"
-    )
-    estimated_carbs_g: Optional[float] = Field(
-        None,
-        ge=0,
-        description="Estimated carbohydrate load for the serving in grams",
-    )
-    rationale: Optional[str] = Field(
-        None, description="Short explanation relating to the user's context"
+    name: str = Field(..., description="Ingredient name")
+    amount_g: float = Field(
+        ..., ge=0, description="Estimated ingredient weight in grams"
     )
 
 
-class HealthGuidance(BaseModel):
-    """Supportive guidance accompanying the recommendation."""
+class FoodPortionAnalysis(BaseModel):
+    """Structured breakdown for the requested food."""
 
-    glucose_action: Optional[str] = Field(
-        None,
-        description="Advice regarding glucose management (e.g. check again in X mins)",
+    food_name: str = Field(..., description="Primary food item under analysis")
+    portion_description: Optional[str] = Field(
+        None, description="User requested portion size"
     )
-    hydration_tip: Optional[str] = None
-    activity_tip: Optional[str] = None
-    warnings: List[str] = Field(default_factory=list)
-
-
-class StructuredMealResponse(BaseModel):
-    """Schema aligned with @LLM Studio Structured Response expectations."""
-
-    food_type: str = Field(
-        ...,
-        description="Primary food category best aligned with the recommendation",
+    portion_weight_g: Optional[float] = Field(
+        None, ge=0, description="Estimated total portion weight in grams"
     )
-    recommended_items: List[FoodItemSuggestion] = Field(
+    ingredients: List[FoodIngredient] = Field(
         default_factory=list,
-        description="List of recommended meal items",
+        description="Ingredient breakdown with weights",
     )
-    health_summary: str = Field(
-        ...,
-        description="Short narrative connecting the recommendation to health data",
+
+
+class FoodAnalysisResponse(BaseModel):
+    """Structured response from the LLM describing the food breakdown."""
+
+    food: FoodPortionAnalysis = Field(
+        ..., description="Ingredient breakdown for the requested food"
     )
-    guidance: HealthGuidance = Field(
-        default_factory=HealthGuidance,
-        description="Operational guidance for glucose management",
+    notes: Optional[str] = Field(
+        None, description="Additional observations or caveats"
     )
+
+
+class FoodAnalysisResult(BaseModel):
+    """Full payload combining the food breakdown and health parameters."""
+
+    health_parameters: HealthInfo = Field(
+        ..., description="Collected health information used for analysis"
+    )
+    food: FoodPortionAnalysis = Field(
+        ..., description="Ingredient breakdown for the requested food"
+    )
+    notes: Optional[str] = Field(None, description="Additional observations or caveats")
 
 
 class ConversationPrompts(BaseModel):
