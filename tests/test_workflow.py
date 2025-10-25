@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -142,3 +144,108 @@ def test_request_food_breakdown_uses_provided_context():
     assert "Chicken stir fry" in prompt
     assert "type 2 diabetes" in prompt
 
+
+class StubClient:
+    def __init__(self, *, payload: str | Exception):
+        self.payload = payload
+        self.calls: int = 0
+
+    def complete(
+        self,
+        *,
+        prompt: str,
+        request_context: LLMRequestContext,
+        system_prompt: str | None = None,
+    ) -> str:
+        self.calls += 1
+        if isinstance(self.payload, Exception):
+            raise self.payload
+        return self.payload
+
+
+@pytest.mark.asyncio
+async def test_continue_query_accepts_llm_validation(tmp_path):
+    query = AIQuery(101, storage_dir=tmp_path)
+    prompt = await query.QueryBody()
+    assert "age" in prompt
+
+    stub_response = json.dumps(
+        {
+            "question": "age",
+            "ask_again": False,
+            "accepted_value": "34",
+            "explanation": "Numeric age within range",
+        }
+    )
+    query._client = StubClient(payload=stub_response)
+
+    keep = await query.ContinueQuery("34")
+
+    assert keep is True
+    assert query._health_answers[0] == "34"
+    assert query._client.calls == 1
+    assert query._retry_message is None
+
+
+@pytest.mark.asyncio
+async def test_continue_query_requests_retry_when_llm_flags_issue(tmp_path):
+    query = AIQuery(102, storage_dir=tmp_path)
+    await query.QueryBody()
+
+    stub_response = json.dumps(
+        {
+            "question": "age",
+            "ask_again": True,
+            "accepted_value": None,
+            "explanation": "Age must be a positive integer.",
+            "next_question": "Please provide your age as a positive whole number.",
+        }
+    )
+    query._client = StubClient(payload=stub_response)
+
+    keep = await query.ContinueQuery("-5")
+
+    assert keep is True
+    assert not query._health_answers
+    assert query._retry_message == "Age must be a positive integer."
+
+    follow_up = await query.QueryBody()
+    assert "Age must be a positive integer." in follow_up
+    assert "positive whole number" in follow_up
+
+
+@pytest.mark.asyncio
+async def test_continue_query_uses_deterministic_validation_before_llm(tmp_path):
+    query = AIQuery(103, storage_dir=tmp_path)
+    await query.QueryBody()
+
+    def fail_complete(**_kwargs):
+        raise AssertionError("LLM should not be called for invalid numeric input")
+
+    query._client.complete = fail_complete  # type: ignore[assignment]
+
+    keep = await query.ContinueQuery("-10")
+
+    assert keep is True
+    assert not query._health_answers
+    assert query._retry_message == "Age must be a positive number."
+
+
+@pytest.mark.asyncio
+async def test_continue_query_falls_back_when_llm_errors_optional(tmp_path):
+    query = AIQuery(104, storage_dir=tmp_path)
+    query._current_question = (
+        "meal",
+        "additional_notes",
+        "Any additional context I should know (activity, symptoms, etc.)?",
+        False,
+    )
+
+    query._client = StubClient(payload=RuntimeError("LLM offline"))
+
+    keep = await query.ContinueQuery("Feeling fine")
+
+    assert keep is True
+    assert query._meal_answers[-1] == "Feeling fine"
+    assert query._client.calls == 1
+    assert query._retry_message is None

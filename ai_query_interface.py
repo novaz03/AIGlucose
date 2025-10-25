@@ -10,9 +10,11 @@ from typing import Any, Optional
 from src.llm_module import (
     ConversationPrompts,
     LLMRequestContext,
+    QuestionEvaluation,
     create_client,
     run_food_analysis_pipeline,
 )
+from src.llm_module.responses import build_input_validation_prompts
 from src.llm_module.workflow import DEFAULT_LMSTUDIO_MODEL
 
 
@@ -114,21 +116,21 @@ class AIQuery:
         if self._current_question is None:
             return self._active
 
-        q_type, key, _prompt_text, required = self._current_question
-        value = user_input.strip()
+        q_type, key, prompt_text, required = self._current_question
+        evaluation = await self._evaluate_answer(
+            key=key,
+            prompt_text=prompt_text,
+            user_input=user_input,
+            required=required,
+        )
 
-        if required and not value:
-            field_label = key.replace("_", " ")
-            self._retry_message = f"I still need your {field_label} to continue."
+        if evaluation.ask_again:
+            self._retry_message = self._build_retry_message(key, evaluation)
+            if evaluation.next_question:
+                self._current_question = (q_type, key, evaluation.next_question, required)
             return self._active
 
-        normalized = value if value else ""
-        if key in {"age", "gender", "weight", "height"}:
-            is_valid, normalized_value, error_message = self._validate_answer(key, value)
-            if not is_valid:
-                self._retry_message = error_message
-                return self._active
-            normalized = normalized_value
+        normalized = evaluation.accepted_value or user_input.strip()
         if q_type == "health":
             self._health_answers.append(normalized)
         else:
@@ -332,3 +334,60 @@ class AIQuery:
             return True, value, ""
 
         return True, value, ""
+
+    async def _evaluate_answer(
+        self,
+        *,
+        key: str,
+        prompt_text: str,
+        user_input: str,
+        required: bool,
+    ) -> QuestionEvaluation:
+        stripped = user_input.strip()
+        if not stripped:
+            if required:
+                field_label = key.replace("_", " ")
+                return QuestionEvaluation(
+                    question=key,
+                    ask_again=True,
+                    explanation=f"Please provide your {field_label}.",
+                )
+            return QuestionEvaluation(question=key, ask_again=False, accepted_value="")
+
+        if key in {"age", "gender", "weight", "height"}:
+            is_valid, normalized_value, error_message = self._validate_answer(key, stripped)
+            if not is_valid:
+                return QuestionEvaluation(question=key, ask_again=True, explanation=error_message)
+            stripped = normalized_value
+
+        system_prompt, user_prompt = build_input_validation_prompts(
+            question_key=key,
+            question_prompt=prompt_text,
+            user_answer=stripped,
+            required=required,
+        )
+
+        try:
+            raw = await asyncio.to_thread(
+                self._client.complete,
+                prompt=user_prompt,
+                request_context=self._request_context,
+                system_prompt=system_prompt,
+            )
+            payload = json.loads(raw)
+            evaluation = QuestionEvaluation.parse_obj(payload)
+        except Exception:
+            if required:
+                return QuestionEvaluation(question=key, ask_again=True)
+            return QuestionEvaluation(question=key, ask_again=False, accepted_value=stripped)
+
+        if evaluation.accepted_value is None:
+            evaluation.accepted_value = stripped
+
+        return evaluation
+
+    def _build_retry_message(self, key: str, evaluation: QuestionEvaluation) -> str:
+        if evaluation.explanation:
+            return evaluation.explanation
+        field_label = key.replace("_", " ")
+        return f"I still need your {field_label} to continue."

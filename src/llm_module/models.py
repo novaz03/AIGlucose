@@ -144,3 +144,35 @@ class LLMRequestContext(BaseModel):
     )
 
 
+class QuestionEvaluation(BaseModel):
+    """LLM-evaluated result for a single conversational answer."""
+
+    question: str = Field(
+        ...,
+        description="Identifier or short label for the question being evaluated",
+    )
+    ask_again: bool = Field(
+        ...,
+        description="True if the assistant should repeat the question to the user",
+    )
+    accepted_value: Optional[str] = Field(
+        None,
+        description=(
+            "Reasonable, cleaned-up value to persist when the user input is acceptable."
+        ),
+    )
+    explanation: Optional[str] = Field(
+        None,
+        description=(
+            "Short justification for the decision or guidance to share with the user."
+        ),
+    )
+    next_question: Optional[str] = Field(
+        None,
+        description=(
+            "Suggested follow-up phrasing to use if the question needs to be asked"
+            " again."
+        ),
+    )
+
+

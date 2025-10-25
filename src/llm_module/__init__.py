@@ -12,6 +12,7 @@ from .models import (
     HealthInfo,
     HealthInfoRepository,
     LLMRequestContext,
+    QuestionEvaluation,
     MealIntent,
     UserContext,
 )
@@ -85,6 +86,7 @@ __all__ = [
     "HealthSessionManager",
     "LLMClientBase",
     "LLMRequestContext",
+    "QuestionEvaluation",
     "LLM_STUDIO_RESPONSE_SCHEMA",
     "LLMOrchestrator",
     "MealIntent",

@@ -5,11 +5,17 @@ from __future__ import annotations
 import json
 from textwrap import dedent
 
-from .models import FoodAnalysisResponse
+from .models import FoodAnalysisResponse, QuestionEvaluation
 
 
 LLM_STUDIO_RESPONSE_SCHEMA = json.dumps(
     FoodAnalysisResponse.model_json_schema(),
+    indent=2,
+)
+
+
+QUESTION_EVALUATION_SCHEMA = json.dumps(
+    QuestionEvaluation.model_json_schema(),
     indent=2,
 )
 
@@ -48,9 +54,87 @@ def build_user_prompt(*, context_json: str) -> str:
     ).strip()
 
 
+def build_input_validation_prompts(
+    *,
+    question_key: str,
+    question_prompt: str,
+    user_answer: str,
+    required: bool,
+) -> tuple[str, str]:
+    """Return system and user prompts instructing the LLM to validate input."""
+
+    system_prompt = dedent(
+        """
+        You are a validation assistant helping gather diabetes context. Always reply
+        with JSON that matches the provided schema. Do not include explanatory text
+        outside of JSON. Evaluate whether the user's answer satisfies the question.
+        """
+    ).strip()
+
+    requirement_label = "required" if required else "optional"
+    answer_literal = json.dumps(user_answer)
+
+    user_prompt = dedent(
+        f"""
+        You must output JSON that conforms to this schema:
+
+        {QUESTION_EVALUATION_SCHEMA}
+
+        Field expectations:
+        - question: Echo the identifier for the question being evaluated. Use one of
+          the following keys: age, gender, weight, height, underlying_disease,
+          race, activity_level, current_glucose_mg_dl, desired_food,
+          portion_size_description, meal_timeframe, additional_notes.
+        - required fields are Age, gender, weight, height, underlying disease 
+        - ask_again: true if the assistant should ask the question again.
+        - accepted_value: When the answer is reasonable, provide a cleaned-up value 
+          ready for persistence (e.g., numeric strings for age/weight/height or
+          title-cased text). Leave null when ask_again is true or no answer is
+          provided.
+        - explanation: Supply a concise reason describing the decision (under
+          120 characters).
+        - next_question: When ask_again is true, provide a short, clear rephrasing
+          to use the next time we ask the user. Address the issue of of user's original response.
+          Provide a clear instruction on how to answer the question.
+
+        Validation guidance:
+        1. Numbers must be positive (age, weight, height, current_glucose_mg_dl) 
+           and make sense in the context of the question.
+        2. Gender must contain alphabetic characters and make sense in the context of the question.
+        3. Meal text fields should be non-empty strings when provided.
+        4. If the answer is missing or invalid, set ask_again to true and leave
+           accepted_value null. Provide a helpful next_question if rephrasing aids clarity.
+        5. If the user asks how to answer, set ask_again to true and respond with a
+           next_question that answers their confusion.
+        6. If the answer is valid but poorly formatted, set ask_again to false and
+           provide a cleaned accepted_value.
+        7. If the field is not required, set ask_again to false and set accepted_value to NA.
+
+        Examples:
+        - Question: "age", User answer: "34" -> ask_again false, accepted_value "34".
+        - Question: "weight", User answer: "-10" -> ask_again true, next_question
+          "Please share your weight in kilograms as a positive number."
+        - Question: "desired_food", User answer: "burger" -> ask_again false,
+          accepted_value "burger".
+
+        Evaluate the following response:
+        - Question key: {question_key}
+        - Question prompt: {question_prompt}
+        - This question is {requirement_label}.
+        - User answer (verbatim): {answer_literal}
+
+        Provide only JSON.
+        """
+    ).strip()
+
+    return system_prompt, user_prompt
+
+
 __all__ = [
     "LLM_STUDIO_RESPONSE_SCHEMA",
+    "QUESTION_EVALUATION_SCHEMA",
     "build_system_prompt",
     "build_user_prompt",
+    "build_input_validation_prompts",
 ]
 
