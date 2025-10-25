@@ -18,7 +18,7 @@ class LMStudioClient(LLMClientBase):
         self,
         *,
         parser,
-        base_url: str = "http://localhost:1234/v1",
+        base_url: str = "http://10.232.226.27:1234/v1",
         timeout: int = 60,
         session: Optional[requests.Session] = None,
     ) -> None:
