@@ -20,6 +20,9 @@ from .models import (
 from .responses import build_system_prompt, build_user_prompt
 
 
+DEFAULT_LMSTUDIO_MODEL = "openai/gpt-oss-20b"
+
+
 class HealthSessionManager:
     """Manages acquisition and persistence of health information."""
 
@@ -132,17 +135,16 @@ class LLMOrchestrator:
     def request_food_breakdown(
         self,
         *,
-        session_manager: HealthSessionManager,
-        prompts: ConversationPrompts,
+        user_context: UserContext,
         request_context: LLMRequestContext,
     ) -> FoodAnalysisResponse:
-        """Collect user context and fetch structured response from the LLM."""
+        """Fetch structured response from the LLM using provided context."""
 
-        user_context = collect_user_context(
-            session_manager=session_manager,
-            prompts=prompts,
+        context_json = json.dumps(
+            user_context.model_dump(),
+            default=str,
+            indent=2,
         )
-        context_json = json.dumps(user_context.dict(), default=str, indent=2)
 
         system_prompt = build_system_prompt()
         user_prompt = build_user_prompt(context_json=context_json)
@@ -221,8 +223,20 @@ def ensure_user_health_profile(
 
     def save(health_info: HealthInfo) -> None:
         payload = json.loads(health_info.model_dump_json(indent=2, exclude_none=False))
+
+        try:
+            if profile_path.exists():
+                with profile_path.open("r", encoding="utf-8") as fh:
+                    existing_data = json.load(fh)
+            else:
+                existing_data = {}
+        except json.JSONDecodeError:
+            existing_data = {}
+
+        existing_data.update(payload)
+
         with profile_path.open("w", encoding="utf-8") as fh:
-            json.dump(payload, fh, indent=2)
+            json.dump(existing_data, fh, indent=2)
 
     repo = HealthInfoRepository(load=load, save=save)
     return repo, save
@@ -256,8 +270,7 @@ def run_food_analysis_pipeline(
 
     orchestrator = LLMOrchestrator(client=client)
     response = orchestrator.request_food_breakdown(
-        session_manager=session_manager,
-        prompts=prompts,
+        user_context=user_context,
         request_context=request_context,
     )
 
@@ -267,6 +280,10 @@ def run_food_analysis_pipeline(
         notes=response.notes,
     )
     result_payload = result.model_dump(exclude_none=True)
+    _persist_pipeline_result(
+        profile_path=storage_dir / f"{ai_query.user_id}.json",
+        result_payload=result_payload,
+    )
     ai_query.store_pipeline_result(result_payload)
     ai_query.stop()
 
@@ -336,6 +353,26 @@ def _collect_required_value(
         if parsed is not None:
             return parsed
         prompts.notify(retry_message)
+
+
+def _persist_pipeline_result(*, profile_path: Path, result_payload: dict[str, Any]) -> None:
+    """Persist the latest food analysis result alongside the user profile."""
+
+    try:
+        if profile_path.exists():
+            with profile_path.open("r", encoding="utf-8") as fh:
+                profile_data = json.load(fh)
+        else:
+            profile_data = {}
+    except json.JSONDecodeError:
+        profile_data = {}
+
+    serializable_result = json.loads(json.dumps(result_payload, default=str))
+    profile_data["last_food_analysis"] = serializable_result
+
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    with profile_path.open("w", encoding="utf-8") as fh:
+        json.dump(profile_data, fh, indent=2)
 
 
 __all__ = [

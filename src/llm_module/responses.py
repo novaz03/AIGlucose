@@ -38,6 +38,11 @@ def build_user_prompt(*, context_json: str) -> str:
 
         {context_json}
 
+        Analyse the user's meal description carefully:
+        - When the user gives only a food, dish, or course name, infer a plausible set of ingredients and provide realistic estimated weights in grams for each ingredient that align with the portion described.
+        - When the user already supplies ingredient details, normalise them and ensure each ingredient entry includes an estimated weight in grams.
+        Always populate `food.ingredients` with at least one ingredient entry and ensure weights are non-negative numbers.
+
         Respond with JSON that matches the schema exactly.
         """
     ).strip()
