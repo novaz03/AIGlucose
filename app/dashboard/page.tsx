@@ -103,13 +103,17 @@ export default function DashboardPage() {
         const raw = sessionStorage.getItem('last_forecast');
         if (raw) {
           const data = JSON.parse(raw);
-          const mins = Array.isArray(data?.minutes) ? data.minutes : [];
-          const abs = Array.isArray(data?.absolute_glucose) ? data.absolute_glucose : [];
-          const points = mins.reduce<ChartPoint[]>((acc, minute, i) => {
-            const glucose = typeof abs[i] === 'number' ? abs[i] : null;
-            if (glucose != null) acc.push({ minute, glucose });
+          const mins: number[] = Array.isArray(data?.minutes)
+            ? (data.minutes as any[]).filter((v: any) => typeof v === 'number') as number[]
+            : [];
+          const abs: number[] = Array.isArray(data?.absolute_glucose)
+            ? (data.absolute_glucose as any[]).filter((v: any) => typeof v === 'number') as number[]
+            : [];
+          const points: ChartPoint[] = mins.reduce((acc: ChartPoint[], minute: number, i: number) => {
+            const glucose = abs[i];
+            if (typeof glucose === 'number') acc.push({ minute, glucose });
             return acc;
-          }, []);
+          }, [] as ChartPoint[]);
           setChartPoints(points);
         } else {
           setChartPoints([]);
