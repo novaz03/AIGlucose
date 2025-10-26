@@ -8,3 +8,4 @@ __pycache__/
 .next/
 node_modules/
 server.log
+pred_outputs/
