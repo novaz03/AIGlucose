@@ -255,8 +255,9 @@ function ChatPageContent() {
     }
 
     const userMessageId = createMessageId();
+    const userMsg: UserMessage = { id: userMessageId, role: "user", text: trimmed };
     setMessages((prev) => {
-      const next = [...prev, { id: userMessageId, role: "user", text: trimmed }];
+      const next: Message[] = [...prev, userMsg];
       persistChat(next, null, userId);
       return next;
     });
@@ -325,14 +326,12 @@ function ChatPageContent() {
       }
     } catch (error) {
       console.error("Sending message failed:", error);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: createMessageId(),
-          role: "assistant",
-          text: "Sorry, I ran into a problem sending your message. Please try again later.",
-        },
-      ]);
+      const errMsg: AssistantMessage = {
+        id: createMessageId(),
+        role: "assistant",
+        text: "Sorry, I ran into a problem sending your message. Please try again later.",
+      };
+      setMessages((prev) => [...prev, errMsg]);
     } finally {
       setIsLoading(false);
     }
