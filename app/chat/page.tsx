@@ -220,7 +220,7 @@ function ChatPageContent() {
               }
             });
           setMessages(assistantMessages);
-          persistChat(assistantMessages, null, String(currentUserId));
+          persistChat(assistantMessages, null, uid);
         }
         setIsSessionActive(true);
       } catch (error) {
