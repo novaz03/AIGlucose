@@ -152,15 +152,23 @@ class App:
         self._append_log(f"AI: {closing}")
 
         payload = await self.query.RequestResult()
-        result = await self.model.predict(payload)
-        self._append_log(f"[Result] {result}")
+        result, png_path, b_safe = await self.model.predict(payload)
+        conclusion = await self.query.Conclusion(result, b_safe)
+        self._append_log(f"AI: {conclusion}")
 
         # destroy query and lock UI
-        self.query = None
-        self.ai_busy = True
-        self.send_button.config(state="disabled")
-        self.user_input.config(state="disabled")
-        self.root.title("Session finished")
+        if b_safe:
+            self.query = None
+            self.ai_busy = True
+            self.send_button.config(state="disabled")
+            self.user_input.config(state="disabled")
+            self.root.title("Session finished")
+        else:
+            self.query = None
+            self.ai_busy = True
+            self.send_button.config(state="disabled")
+            self.user_input.config(state="disabled")
+            self.root.title("Session finished")
 
     def run(self):
         self.root.mainloop()

@@ -5,7 +5,7 @@ import asyncio
 import json
 import io
 import base64
-from typing import Any, Dict, List, Optional, Mapping
+from typing import Any, Dict, List, Optional, Mapping, Tuple
 from pathlib import Path
 from datetime import datetime
 
@@ -264,7 +264,7 @@ class PredictionModel:
         return df
 
     # ----- Core predict (single) -----
-    async def predict(self, payload: Any) -> str:
+    async def predict(self, payload: Any) -> Tuple[str, str, bool]: # json, png_path, b_is_safe
         """
         Returns JSON string; also writes PNG/JSON to disk by default.
         JSON fields:
@@ -332,7 +332,7 @@ class PredictionModel:
             json_path.write_text(json.dumps(result, indent=2), encoding="utf-8")
             result["json_path"] = str(json_path.resolve())
 
-        return json.dumps(result)
+        return json.dumps(result), str(result.get("image_path", "")), all([i < 240 for i in result["absolute_glucose"]])
 
     # ----- Batch predict (vectorized & fast) -----
     async def predict_many(self, payloads: List[Mapping[str, Any]]) -> str:

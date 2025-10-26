@@ -21,6 +21,7 @@ class GeminiClient(LLMClientBase):
         api_key: str,
         default_generation_config: Optional[Dict[str, Any]] = None,
         default_safety_settings: Optional[Any] = None,
+        strict_json: bool = True,
     ) -> None:
         if not api_key:
             raise ValueError("GeminiClient requires a valid api_key")
@@ -30,6 +31,7 @@ class GeminiClient(LLMClientBase):
 
         self._default_generation_config = default_generation_config or {}
         self._default_safety_settings = default_safety_settings
+        self._strict_json = strict_json
 
     def complete(
         self,
@@ -46,7 +48,9 @@ class GeminiClient(LLMClientBase):
         response_kwargs: Dict[str, Any] = {}
 
         if request_context.response_format:
-            generation_config.setdefault("response_mime_type", "application/json")
+            response_kwargs.setdefault("response_schema", request_context.response_format)
+            if self._strict_json:
+                response_kwargs.setdefault("response_mime_type", "application/json")
 
         safety_settings = extra_options.pop("safety_settings", self._default_safety_settings)
 
