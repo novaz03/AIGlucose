@@ -12,29 +12,32 @@ from .models import FoodAnalysisResponse, ProfileUpdateResponse, QuestionEvaluat
 FOOD_ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
-        "food": {
+        "recipe": {
             "type": "object",
             "properties": {
-                "food_name": {"type": "string"},
-                "portion_description": {"type": "string"},
-                "portion_weight_g": {"type": "number"},
+                "title": {"type": "string"},
                 "ingredients": {
                     "type": "array",
                     "items": {
                         "type": "object",
                         "properties": {
                             "name": {"type": "string"},
-                            "amount_g": {"type": "number"}
+                            "amount": {"type": "string"}
                         },
-                        "required": ["name", "amount_g"]
-                    }
+                        "required": ["name", "amount"]
+                    },
+                    "minItems": 1
+                },
+                "steps": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1
                 }
             },
-            "required": ["food_name", "ingredients"]
-        },
-        "notes": {"type": "string"}
+            "required": ["title", "ingredients", "steps"]
+        }
     },
-    "required": ["food"]
+    "required": ["recipe"]
 }
 
 LLM_STUDIO_RESPONSE_SCHEMA = json.dumps(
@@ -88,7 +91,10 @@ def build_system_prompt() -> str:
 
     return dedent(
         """
-        You are a diabetes meal planning assistant. Analyze the user's request and provide a structured response.
+        You are a world-class diabetes meal planning assistant. Your primary goal is to craft low-glycemic impact, nutrient-balanced, single-serving recipes.
+        You MUST ALWAYS produce output that can be parsed as JSON matching the provided schema.
+        The `ingredients` and `steps` arrays in your response MUST NOT be empty.
+        If the user's request is too vague to create a full recipe, you MUST ask for more details instead of returning an empty recipe.
         """
     ).strip()
 
@@ -102,10 +108,31 @@ def build_user_prompt(*, context_json: str) -> str:
 
         {context_json}
 
-        Analyse the user's meal description carefully:
-        - When the user gives only a food, dish, or course name, infer a plausible set of ingredients and provide realistic estimated weights in grams for each ingredient that align with the portion described.
-        - When the user already supplies ingredient details, normalise them and ensure each ingredient entry includes an estimated weight in grams.
-        Always populate `food.ingredients` with at least one ingredient entry and ensure weights are non-negative numbers.
+        Analyse the user's meal request carefully:
+        - When the user only states a dish, infer a practical low-GI interpretation that keeps post-meal glucose rise slow.
+        - Use lean proteins, high-fibre vegetables, whole grains or legumes, healthy fats, and portion sizes suitable for one adult.
+        - The `recipe.steps` array must contain at least three descriptive strings.
+
+        Here is an example of a perfect response format:
+        ```json
+        {{
+          "recipe": {{
+            "title": "Lemon Herb Baked Cod",
+            "ingredients": [
+              {{ "name": "Cod fillet", "amount": "150g" }},
+              {{ "name": "Lemon", "amount": "1/2" }},
+              {{ "name": "Fresh parsley", "amount": "1 tbsp" }},
+              {{ "name": "Olive oil", "amount": "1 tsp" }}
+            ],
+            "steps": [
+              "Preheat oven to 200°C (400°F).",
+              "Place cod on a baking sheet, drizzle with olive oil, and season with herbs.",
+              "Squeeze lemon juice over the top and bake for 12-15 minutes until flaky.",
+              "Serve immediately with a side of steamed vegetables."
+            ]
+          }}
+        }}
+        ```
         """
     ).strip()
 
@@ -250,4 +277,3 @@ __all__ = [
     "build_user_prompt",
     "build_input_validation_prompts",
 ]
-

@@ -1,15 +1,20 @@
 # main_app.py
 import asyncio
+import json
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional, Any, Dict, List
 
 from flask import Flask, request, session, redirect, url_for, jsonify, render_template
 from flask_cors import CORS, cross_origin
 
 # Your existing modules (unchanged)
+import ai_query_interface
 from ai_query_interface import AIQuery
 from prediction_model import PredictionModel
+from src.llm_module.models import HealthInfo
+from src.llm_module.workflow import ensure_user_health_profile
 
 
 class App:
@@ -164,9 +169,25 @@ class SessionState:
     query: Optional[AIQuery]
     model: PredictionModel
     finished: bool
+    user_id: Optional[int] = None
 
 
 _sessions: Dict[str, SessionState] = {}
+USER_DATA_DIR = Path(ai_query_interface.__file__).resolve().parent / "user_data"
+UNDERLYING_DISEASE_CHOICES = {
+    "Type 1 Diabetes",
+    "Type 2 Diabetes",
+    "Prediabetes",
+    "Healthy",
+}
+UNDERLYING_DISEASE_LEGACY_MAP = {
+    "1型糖尿病": "Type 1 Diabetes",
+    "2型糖尿病": "Type 2 Diabetes",
+    "糖前": "Prediabetes",
+    "健康模式": "Healthy Mode",
+}
+
+USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _get_sid() -> str:
@@ -216,8 +237,10 @@ def api_login():
         return jsonify({"ok": False, "error": "User ID must be numeric."}), 400
 
     st = _get_state(create_if_missing=True)
+    numeric_user_id = int(user_id)
+    st.user_id = numeric_user_id
     try:
-        st.query = AIQuery(int(user_id))
+        st.query = AIQuery(numeric_user_id)
     except Exception as e:
         return jsonify({"ok": False, "error": f"AI service failed to initialize: {e}"}), 500
     st.finished = False
@@ -241,12 +264,171 @@ def api_greet():
 
     msgs: List[Dict[str, Any]] = []
     if not st.query:
-        msgs.append({"type": "system", "role": "System", "text": "Please login first."})
-        return jsonify({"messages": msgs})
+        if st.user_id is None:
+            msgs.append({"type": "system", "role": "System", "text": "Please login first."})
+            return jsonify({"messages": msgs})
+        try:
+            st.query = AIQuery(st.user_id)
+            st.finished = False
+        except Exception as exc:
+            return jsonify({"messages": [{"type": "system", "role": "System", "text": f"Failed to start session: {exc}"}]}), 500
 
     greeting = asyncio.run(st.query.Greeting())
     msgs.append({"type": "chat", "role": "AI", "text": greeting})
+    first_prompt = asyncio.run(st.query.QueryBody())
+    if first_prompt:
+        msgs.append({"type": "chat", "role": "AI", "text": first_prompt})
     return jsonify({"messages": msgs})
+
+
+@app.get("/api/profile")
+@cross_origin(origins=list(frontend_origins), supports_credentials=True)
+def api_get_profile():
+    st = _get_state(create_if_missing=False)
+    if not st or st.user_id is None:
+        return jsonify({"ok": False, "error": "Not logged in."}), 401
+
+    repo, _ = ensure_user_health_profile(user_id=st.user_id, storage_dir=USER_DATA_DIR)
+    health_info = repo.load() or HealthInfo()
+    normalised_disease = _normalise_underlying_disease(health_info.underlying_disease)
+    if normalised_disease != health_info.underlying_disease:
+        health_info = health_info.model_copy(update={"underlying_disease": normalised_disease})
+        repo.save(health_info)
+    return jsonify({"ok": True, "profile": _serialize_health_info(health_info)})
+
+
+@app.post("/api/profile")
+@cross_origin(origins=list(frontend_origins), supports_credentials=True)
+def api_update_profile():
+    st = _get_state(create_if_missing=False)
+    if not st or st.user_id is None:
+        return jsonify({"ok": False, "error": "Not logged in."}), 401
+
+    data = request.get_json(silent=True) or {}
+
+    try:
+        age = int(data.get("age"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Invalid age."}), 400
+
+    try:
+        height_cm = float(data.get("height_cm"))
+        weight_kg = float(data.get("weight_kg"))
+    except (TypeError, ValueError):
+        return jsonify({"ok": False, "error": "Invalid height or weight."}), 400
+
+    if age <= 0 or height_cm <= 0 or weight_kg <= 0:
+        return jsonify({"ok": False, "error": "Metrics must be positive."}), 400
+
+    raw_underlying_disease = data.get("underlying_disease", "")
+    underlying_disease = _normalise_underlying_disease(raw_underlying_disease)
+    if underlying_disease not in UNDERLYING_DISEASE_CHOICES:
+        return jsonify({"ok": False, "error": "Invalid underlying disease."}), 400
+
+    repo, _ = ensure_user_health_profile(user_id=st.user_id, storage_dir=USER_DATA_DIR)
+    existing = repo.load() or HealthInfo()
+
+    updated = existing.model_copy(
+        update={
+            "age": age,
+            "height_cm": height_cm,
+            "weight_kg": weight_kg,
+            "underlying_disease": underlying_disease,
+        }
+    )
+
+    repo.save(updated)
+
+    if st.query:
+        st.query._load_profile_into_state(updated.model_dump(exclude_none=False))
+
+    return jsonify({"ok": True, "profile": _serialize_health_info(updated)})
+
+
+@app.get("/api/session")
+@cross_origin(origins=list(frontend_origins), supports_credentials=True)
+def api_session():
+    st = _get_state(create_if_missing=False)
+    if not st or st.user_id is None:
+        return jsonify({"ok": False, "error": "Not logged in."}), 401
+    return jsonify({"ok": True, "user_id": st.user_id})
+
+
+def _safe_float(value: Any, default: Optional[float] = None) -> Optional[float]:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalise_underlying_disease(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    stripped = str(value).strip()
+    if not stripped:
+        return None
+    return UNDERLYING_DISEASE_LEGACY_MAP.get(stripped, stripped)
+
+
+@app.post("/api/predict")
+@cross_origin(origins=list(frontend_origins), supports_credentials=True)
+def api_predict():
+    st = _get_state(create_if_missing=False)
+    if not st or st.user_id is None:
+        return jsonify({"ok": False, "error": "Not logged in."}), 401
+
+    data = request.get_json(silent=True) or {}
+
+    repo, _ = ensure_user_health_profile(user_id=st.user_id, storage_dir=USER_DATA_DIR)
+    profile = repo.load() or HealthInfo()
+
+    height_cm = _safe_float(data.get("height_cm"), profile.height_cm)
+    weight_kg = _safe_float(data.get("weight_kg"), profile.weight_kg)
+    age = _safe_float(data.get("age"), profile.age)
+    gender = data.get("gender") or profile.gender or "Unknown"
+
+    if height_cm is None or weight_kg is None:
+        return jsonify({"ok": False, "error": "Height and weight are required."}), 400
+
+    baseline_avg_glucose = _safe_float(data.get("baseline_avg_glucose"), 100.0)
+    meal_bucket = str(data.get("meal_bucket") or "Lunch")
+
+    payload = {
+        "meal_bucket": meal_bucket,
+        "baseline_avg_glucose": baseline_avg_glucose,
+        "meal_calories": _safe_float(data.get("meal_calories"), 480.0),
+        "carbs_g": _safe_float(data.get("carbs_g"), 60.0),
+        "protein_g": _safe_float(data.get("protein_g"), 24.0),
+        "fat_g": _safe_float(data.get("fat_g"), 18.0),
+        "fiber_g": _safe_float(data.get("fiber_g"), 8.0),
+        "amount_consumed": _safe_float(data.get("amount_consumed"), 1.0),
+        "Age": age,
+        "Gender": gender,
+        "Body weight": weight_kg,
+        "Height": height_cm,
+        "activity_cal_mean": _safe_float(data.get("activity_cal_mean"), 120.0),
+        "mets_mean": _safe_float(data.get("mets_mean"), 1.2),
+        "return_plot": False,
+        "return_csv": False,
+    }
+
+    try:
+        raw_result = asyncio.run(st.model.predict(payload))
+        result = json.loads(raw_result)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover - safeguard
+        return jsonify({"ok": False, "error": f"Prediction failed: {exc}"}), 500
+
+    response_payload = {
+        "minutes": result.get("minutes", []),
+        "absolute_glucose": result.get("absolute_glucose", []),
+        "delta_glucose": result.get("delta_glucose", []),
+        "inputs_used": result.get("inputs_used", {}),
+    }
+    return jsonify({"ok": True, "forecast": response_payload})
 
 
 @app.post("/api/send")
@@ -271,17 +453,27 @@ def api_send():
         closing = asyncio.run(st.query.Closing())
         messages.append({"type": "chat", "role": "AI", "text": closing})
 
-        payload = asyncio.run(st.query.RequestResult())
-        result = asyncio.run(st.model.predict(payload))
-        messages.append({"type": "result", "text": str(result)})
-
-        st.query = None
-        st.finished = True
-        return jsonify({"messages": messages, "finished": True})
-
     body = asyncio.run(st.query.QueryBody())
     messages.append({"type": "chat", "role": "AI", "text": body})
+
+    is_finished = not getattr(st.query, "_active", True)
+    if is_finished:
+        payload = asyncio.run(st.query.RequestResult())
+        st.query = None
+        st.finished = True
+        return jsonify({"messages": messages, "finished": True, "result": payload})
+
     return jsonify({"messages": messages, "finished": False})
+
+
+def _serialize_health_info(info: HealthInfo) -> Dict[str, Any]:
+    disease = _normalise_underlying_disease(info.underlying_disease)
+    return {
+        "age": info.age,
+        "height_cm": info.height_cm,
+        "weight_kg": info.weight_kg,
+        "underlying_disease": disease,
+    }
 
 
 if __name__ == "__main__":

@@ -6,7 +6,7 @@ import json
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
-from .models import FoodAnalysisResponse, LLMRequestContext
+from .models import FoodAnalysisResponse, LLMRequestContext, Recipe
 from .utils import strip_json_code_fence
 
 
@@ -55,12 +55,16 @@ class LLMClientBase(ABC):
 
         # If response_format is provided, the model should return structured output
         if request_context.response_format:
+            cleaned_output = strip_json_code_fence(raw_output)
             try:
                 # Parse the structured response directly
-                parsed_data = json.loads(raw_output)
+                parsed_data = json.loads(cleaned_output)
                 return FoodAnalysisResponse.model_validate(parsed_data)
             except (json.JSONDecodeError, ValueError) as exc:
-                raise LLMClientError(f"Failed to parse structured LLM output: {exc}") from exc
+                # Fallback: if parsing fails, wrap the raw text in a response object
+                # so the frontend can attempt to parse it from the message text.
+                fallback_recipe = Recipe(title="Recipe", steps=[cleaned_output])
+                return FoodAnalysisResponse(recipe=fallback_recipe)
         else:
             # Fall back to parser for backward compatibility
             try:
@@ -90,4 +94,3 @@ __all__ = [
     "StructuredResponseParser",
     "default_parser",
 ]
-

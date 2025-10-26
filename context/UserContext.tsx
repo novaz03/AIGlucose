@@ -5,18 +5,21 @@ import {
   type ReactNode,
   useContext,
   useMemo,
-  useState
+  useState,
+  useCallback
 } from "react";
 
 export type HeightUnit = "cm" | "ft";
 export type WeightUnit = "kg" | "lb";
 
 export type UserMetrics = {
+  age: number | null;
   height: number | null;
   weight: number | null;
   heightUnit: HeightUnit;
   weightUnit: WeightUnit;
   a1c: number | null;
+  underlyingDisease: string | null;
 };
 
 type UserContextValue = {
@@ -28,26 +31,28 @@ const UserContext = createContext<UserContextValue | undefined>(undefined);
 
 export function UserProvider({ children }: { children: ReactNode }) {
   const [metrics, setMetrics] = useState<UserMetrics>({
+    age: null,
     height: null,
     weight: null,
     heightUnit: "cm",
     weightUnit: "kg",
-    a1c: null
+    a1c: null,
+    underlyingDisease: null
   });
 
-  const updateMetrics = (updates: Partial<UserMetrics>) => {
+  const updateMetrics = useCallback((updates: Partial<UserMetrics>) => {
     setMetrics((current) => ({
       ...current,
       ...updates
     }));
-  };
+  }, []);
 
   const value = useMemo(
     () => ({
       metrics,
       updateMetrics
     }),
-    [metrics]
+    [metrics, updateMetrics]
   );
 
   return <UserContext.Provider value={value}>{children}</UserContext.Provider>;

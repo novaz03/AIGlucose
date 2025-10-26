@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -12,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useUser } from "@/context/UserContext";
 import type { HeightUnit, WeightUnit } from "@/context/UserContext";
+import { fetchProfile, updateProfile } from "@/lib/api";
 import {
   convertHeightToCentimeters,
   convertHeightToUnit,
@@ -30,6 +32,13 @@ const HEIGHT_UNIT_OPTIONS: Array<{ label: string; value: HeightUnit }> = [
 const WEIGHT_UNIT_OPTIONS: Array<{ label: string; value: WeightUnit }> = [
   { label: "kg", value: "kg" },
   { label: "lb", value: "lb" }
+];
+
+const UNDERLYING_DISEASE_OPTIONS: Array<{ label: string; value: string }> = [
+  { label: "Type 1 Diabetes", value: "Type 1 Diabetes" },
+  { label: "Type 2 Diabetes", value: "Type 2 Diabetes" },
+  { label: "Prediabetes", value: "Prediabetes" },
+  { label: "Healthy Mode", value: "Healthy Mode" }
 ];
 
 export default function ProfilePage() {
@@ -58,21 +67,73 @@ export default function ProfilePage() {
 }
 
 function ProfileForm() {
+  const router = useRouter();
   const {
-    metrics: { height, weight, heightUnit, weightUnit, a1c },
+    metrics: { age, height, weight, heightUnit, weightUnit, a1c, underlyingDisease },
     updateMetrics
   } = useUser();
 
+  const [ageValue, setAgeValue] = useState("");
   const [heightValue, setHeightValue] = useState("");
   const [weightValue, setWeightValue] = useState("");
   const [a1cValue, setA1cValue] = useState("");
+  const [diseaseValue, setDiseaseValue] = useState("");
   const [heightUnitState, setHeightUnitState] = useState<HeightUnit>("cm");
   const [weightUnitState, setWeightUnitState] = useState<WeightUnit>("kg");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    let redirectTimer: number | undefined;
+
+    const loadProfile = async () => {
+      try {
+        const profile = await fetchProfile();
+        if (cancelled) {
+          return;
+        }
+        updateMetrics({
+          age: typeof profile.age === "number" ? profile.age : null,
+          height: typeof profile.height_cm === "number" ? profile.height_cm : null,
+          weight: typeof profile.weight_kg === "number" ? profile.weight_kg : null,
+          underlyingDisease: profile.underlying_disease ?? null
+        });
+        setErrorMessage(null);
+      } catch (error) {
+        if (!cancelled) {
+          const message = error instanceof Error ? error.message : "Failed to load profile";
+          setErrorMessage(message);
+          if (message.toLowerCase().includes("not logged in")) {
+            redirectTimer = window.setTimeout(() => {
+              router.replace("/login");
+            }, 1200);
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      cancelled = true;
+      if (redirectTimer) {
+        window.clearTimeout(redirectTimer);
+      }
+    };
+  }, [router, updateMetrics]);
 
   useEffect(() => {
     setHeightUnitState(heightUnit);
     setWeightUnitState(weightUnit);
+
+    setAgeValue(age != null ? Math.round(age).toString() : "");
 
     setHeightValue(
       height != null
@@ -91,10 +152,23 @@ function ProfileForm() {
         : ""
     );
     setA1cValue(a1c != null ? formatInputForField(a1c, 1) : "");
-  }, [height, weight, heightUnit, weightUnit, a1c]);
+    setDiseaseValue(underlyingDisease ?? "");
+  }, [age, height, weight, heightUnit, weightUnit, a1c, underlyingDisease]);
 
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (isLoading || isSubmitting) {
+      return;
+    }
+
+    setStatusMessage(null);
+    setErrorMessage(null);
+
+    const parsedAge = Number(ageValue);
+    if (!Number.isFinite(parsedAge) || parsedAge <= 0) {
+      setErrorMessage("Please enter a valid age.");
+      return;
+    }
 
     const parsedHeight = parseFloat(heightValue);
     const parsedWeight = parseFloat(weightValue);
@@ -107,16 +181,47 @@ function ProfileForm() {
       ? convertWeightToKilograms(parsedWeight, weightUnitState)
       : null;
 
-    updateMetrics({
-      height: heightInCm,
-      weight: weightInKg,
-      heightUnit: heightUnitState,
-      weightUnit: weightUnitState,
-      a1c: Number.isFinite(parsedA1c) ? parsedA1c : null
-    });
+    if (heightInCm == null || heightInCm <= 0) {
+      setErrorMessage("Please enter a valid height.");
+      return;
+    }
 
-    setStatusMessage("Metrics saved successfully.");
-    setTimeout(() => setStatusMessage(null), 2800);
+    if (weightInKg == null || weightInKg <= 0) {
+      setErrorMessage("Please enter a valid weight.");
+      return;
+    }
+
+    if (!diseaseValue) {
+      setErrorMessage("Select an underlying condition.");
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      const savedProfile = await updateProfile({
+        age: Math.round(parsedAge),
+        height_cm: heightInCm,
+        weight_kg: weightInKg,
+        underlying_disease: diseaseValue,
+      });
+
+      updateMetrics({
+        age: typeof savedProfile.age === "number" ? savedProfile.age : Math.round(parsedAge),
+        height: typeof savedProfile.height_cm === "number" ? savedProfile.height_cm : heightInCm,
+        weight: typeof savedProfile.weight_kg === "number" ? savedProfile.weight_kg : weightInKg,
+        heightUnit: heightUnitState,
+        weightUnit: weightUnitState,
+        a1c: Number.isFinite(parsedA1c) ? parsedA1c : null,
+        underlyingDisease: savedProfile.underlying_disease ?? diseaseValue,
+      });
+
+      setStatusMessage("Profile saved.");
+      setTimeout(() => setStatusMessage(null), 2800);
+    } catch (error: unknown) {
+      setErrorMessage(error instanceof Error ? error.message : "Failed to save profile.");
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   const handleHeightUnitChange = (unit: HeightUnit) => {
@@ -155,13 +260,29 @@ function ProfileForm() {
     }
   };
 
+  const isBusy = isSubmitting || isLoading;
+
   return (
     <Card className="rounded-3xl border-0 bg-white px-5 py-6 sm:px-7 sm:py-8">
       <CardHeader className="space-y-1.5 p-0">
       </CardHeader>
       <CardContent className="mt-10 p-0">
-        <form className="space-y-8" onSubmit={handleSubmit}>
+        <form className="space-y-8" onSubmit={handleSubmit} aria-busy={isBusy}>
+          {isLoading ? (
+            <p className="text-sm text-slate-500" aria-live="polite">
+              Loading profile...
+            </p>
+          ) : null}
           <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+            <SimpleField
+              id="age"
+              label="Age"
+              placeholder="e.g. 30"
+              value={ageValue}
+              onChange={setAgeValue}
+              suffix="yrs"
+              disabled={isBusy}
+            />
             <MeasurementField
               id="height"
               label="Height"
@@ -171,6 +292,7 @@ function ProfileForm() {
               unitValue={heightUnitState}
               onUnitChange={handleHeightUnitChange}
               unitOptions={HEIGHT_UNIT_OPTIONS}
+              disabled={isBusy}
             />
             <MeasurementField
               id="weight"
@@ -181,6 +303,7 @@ function ProfileForm() {
               unitValue={weightUnitState}
               onUnitChange={handleWeightUnitChange}
               unitOptions={WEIGHT_UNIT_OPTIONS}
+              disabled={isBusy}
             />
             <SimpleField
               id="a1c"
@@ -189,15 +312,32 @@ function ProfileForm() {
               value={a1cValue}
               onChange={setA1cValue}
               suffix="%"
+              disabled={isBusy}
             />
           </div>
+
+          <SelectField
+            id="underlying-disease"
+            label="Underlying condition"
+            value={diseaseValue}
+            onChange={setDiseaseValue}
+            options={UNDERLYING_DISEASE_OPTIONS}
+            disabled={isBusy}
+          />
+
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <Button
               type="submit"
+              disabled={isBusy}
               className="rounded-full bg-emerald-600 px-8 py-3 text-sm font-semibold text-white shadow-lg shadow-emerald-200/40 transition-all hover:-translate-y-0.5 hover:bg-emerald-700 focus-visible:ring-emerald-500"
             >
-              Save
+              {isSubmitting ? "Saving..." : "Save"}
             </Button>
+            {errorMessage ? (
+              <span className="text-sm text-red-500" aria-live="assertive">
+                {errorMessage}
+              </span>
+            ) : null}
             {statusMessage ? (
               <span className="text-sm text-slate-500" aria-live="polite">
                 {statusMessage}
@@ -218,7 +358,8 @@ function MeasurementField<T extends HeightUnit | WeightUnit>({
   onChange,
   unitOptions,
   unitValue,
-  onUnitChange
+  onUnitChange,
+  disabled
 }: {
   id: string;
   label: string;
@@ -228,6 +369,7 @@ function MeasurementField<T extends HeightUnit | WeightUnit>({
   unitOptions: Array<{ label: string; value: T }>;
   unitValue: T;
   onUnitChange: (value: T) => void;
+  disabled?: boolean;
 }) {
   return (
     <label className="group relative flex flex-col rounded-3xl" htmlFor={id}>
@@ -244,6 +386,7 @@ function MeasurementField<T extends HeightUnit | WeightUnit>({
           placeholder={placeholder}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
           className="h-14 w-full rounded-2xl border border-white/60 bg-[#edf1f9] text-base text-slate-800 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-emerald-400"
         />
         </div>
@@ -251,6 +394,7 @@ function MeasurementField<T extends HeightUnit | WeightUnit>({
           options={unitOptions}
           current={unitValue}
           onChange={onUnitChange}
+          disabled={disabled}
         />
       </div>
     </label>
@@ -263,7 +407,8 @@ function SimpleField({
   placeholder,
   value,
   onChange,
-  suffix
+  suffix,
+  disabled
 }: {
   id: string;
   label: string;
@@ -271,6 +416,7 @@ function SimpleField({
   value: string;
   onChange: (value: string) => void;
   suffix?: string;
+  disabled?: boolean;
 }) {
   return (
     <label className="group relative flex flex-col rounded-3xl" htmlFor={id}>
@@ -286,6 +432,7 @@ function SimpleField({
           placeholder={placeholder}
           value={value}
           onChange={(event) => onChange(event.target.value)}
+          disabled={disabled}
           className="h-14 w-full rounded-2xl border border-white/60 bg-[#edf1f9] text-base text-slate-800 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-emerald-400"
         />
         {suffix ? (
@@ -301,11 +448,13 @@ function SimpleField({
 function UnitToggle<T extends HeightUnit | WeightUnit>({
   options,
   current,
-  onChange
+  onChange,
+  disabled
 }: {
   options: Array<{ label: string; value: T }>;
   current: T;
   onChange: (value: T) => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="inline-flex rounded-full bg-[#edf1f9] p-1 shadow-[inset_6px_6px_12px_rgba(209,217,230,0.55),inset_-6px_-6px_12px_rgba(255,255,255,0.9)]">
@@ -316,6 +465,7 @@ function UnitToggle<T extends HeightUnit | WeightUnit>({
             key={option.value}
             type="button"
             onClick={() => onChange(option.value)}
+            disabled={disabled}
             className={`relative min-w-[64px] rounded-full px-4 py-2 text-xs font-semibold uppercase tracking-normal transition-all ${
               active
                 ? "text-emerald-600 shadow-[6px_6px_12px_rgba(209,217,230,0.4),_-6px_-6px_12px_rgba(255,255,255,0.95)] bg-white"
@@ -330,9 +480,51 @@ function UnitToggle<T extends HeightUnit | WeightUnit>({
   );
 }
 
+function SelectField({
+  id,
+  label,
+  value,
+  onChange,
+  options,
+  disabled
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  options: Array<{ label: string; value: string }>;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="group relative flex flex-col rounded-3xl" htmlFor={id}>
+      <span className="mb-3 text-sm font-medium uppercase tracking-normal text-slate-500">
+        {label}
+      </span>
+      <select
+        id={id}
+        name={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        required
+        className="h-14 w-full rounded-2xl border border-white/60 bg-[#edf1f9] px-4 text-base text-slate-800 focus-visible:ring-2 focus-visible:ring-emerald-400"
+      >
+        <option value="" disabled={Boolean(value)}>
+          Select an option
+        </option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function StatusPreview() {
   const {
-    metrics: { height, weight, heightUnit, weightUnit, a1c }
+    metrics: { age, height, weight, heightUnit, weightUnit, a1c, underlyingDisease }
   } = useUser();
 
   return (
@@ -347,6 +539,7 @@ function StatusPreview() {
           </CardDescription>
         </CardHeader>
         <CardContent className="mt-8 grid gap-6 p-0">
+          <MetricBadge label="Age" value={formatAge(age)} />
           <MetricBadge
             label="Height"
             value={formatHeight(height, heightUnit)}
@@ -355,6 +548,7 @@ function StatusPreview() {
             label="Weight"
             value={formatWeight(weight, weightUnit)}
           />
+          <MetricBadge label="Condition" value={formatUnderlyingDisease(underlyingDisease)} />
           <MetricBadge label="A1c" value={formatA1c(a1c)} />
         </CardContent>
       </Card>
@@ -376,4 +570,15 @@ function MetricBadge({ label, value }: { label: string; value: string }) {
 function formatInputForField(value: number, digits: number) {
   const rounded = Number(value.toFixed(digits));
   return Number.isFinite(rounded) ? rounded.toString() : "";
+}
+
+function formatAge(age: number | null) {
+  if (age == null || Number.isNaN(age)) {
+    return "-";
+  }
+  return `${Math.round(age)} yrs`;
+}
+
+function formatUnderlyingDisease(value: string | null) {
+  return value && value.trim().length > 0 ? value : "-";
 }

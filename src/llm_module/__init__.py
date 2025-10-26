@@ -9,11 +9,15 @@ from .models import (
     ConversationPrompts,
     FoodAnalysisResponse,
     FoodAnalysisResult,
+    FoodIngredient,
+    FoodPortionAnalysis,
     HealthInfo,
     HealthInfoRepository,
     LLMRequestContext,
     QuestionEvaluation,
     MealIntent,
+    Recipe,
+    RecipeIngredient,
     UserContext,
 )
 from .question_bank import (
@@ -95,6 +99,8 @@ __all__ = [
     "ConversationPrompts",
     "FoodAnalysisResponse",
     "FoodAnalysisResult",
+    "FoodIngredient",
+    "FoodPortionAnalysis",
     "HealthInfo",
     "HealthInfoRepository",
     "HealthSessionManager",
@@ -104,6 +110,8 @@ __all__ = [
     "LLM_STUDIO_RESPONSE_SCHEMA",
     "LLMOrchestrator",
     "MealIntent",
+    "Recipe",
+    "RecipeIngredient",
     "UserContext",
     "build_system_prompt",
     "build_user_prompt",
@@ -122,4 +130,3 @@ __all__ = [
     "REQUIRED_HEALTH_KEYS",
     "GeminiClient",
 ]
-

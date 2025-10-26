@@ -58,7 +58,7 @@ export default function LoginPage() {
       const response = await login(trimmedId);
       if (response.ok) {
         closeDialog();
-        router.push(`/chat?userId=${trimmedId}`);
+        router.push(`/chat`);
       } else {
         setError(response.error || 'An unknown error occurred.');
       }

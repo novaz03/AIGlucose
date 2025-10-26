@@ -42,7 +42,7 @@ import google.generativeai as genai
 import logging
 
 logging.basicConfig(
-    filename="server.log",  # 不写就默认 stdout
+    filename="server.log",  # defaults to stdout when omitted
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
@@ -73,7 +73,12 @@ def _build_llm_configuration() -> tuple[Any, LLMRequestContext]:
     load_dotenv()
     if provider == "gemini":
         model_name = os.getenv("LLM_MODEL") or DEFAULT_GEMINI_MODEL
-        api_key = os.getenv("GEMINI_API_KEY")
+        raw_key = os.getenv("GEMINI_API_KEY")
+        if raw_key:
+            masked_key = raw_key if len(raw_key) <= 8 else f"{raw_key[:4]}...{raw_key[-4:]}"
+            logger.info("GEMINI_API_KEY detected (masked): %s", masked_key)
+        else:
+            logger.info("GEMINI_API_KEY missing or empty")
         generation_overrides = _parse_json_dict(os.getenv("GEMINI_GENERATION_CONFIG"))
         safety_settings_raw = os.getenv("GEMINI_SAFETY_SETTINGS")
         safety_settings = None
@@ -84,6 +89,7 @@ def _build_llm_configuration() -> tuple[Any, LLMRequestContext]:
                 logger.warning("Invalid JSON for GEMINI_SAFETY_SETTINGS; ignoring value.")
 
         client, request_context = create_gemini_components(
+            api_key=raw_key,
             model_name=model_name,
             generation_config_overrides=generation_overrides or None,
             safety_settings=safety_settings,
@@ -156,9 +162,9 @@ class AIQuery:
         self._active = True
         self._pipeline_result: Any | None = None
 
+        meal_prompt = "What dish or ingredients would you like me to turn into a low-GI, balanced recipe?"
         self._questions: deque[tuple[str, str, str, bool]] = deque(
-            (spec.category, spec.key, spec.prompt, spec.required)
-            for spec in QUESTION_SPECS
+            [("meal", "desired_food", meal_prompt, True)]
         )
         self._current_question: Optional[tuple[str, str, str, bool]] = None
         self._health_answers: list[str] = []
@@ -182,7 +188,7 @@ class AIQuery:
         self._ready_for_pipeline = False
 
     async def Greeting(self) -> str:
-        return "Hello, this is your diabetes meal planning assistant."
+        return "Hi there! Share a dish name or list of ingredients and I'll craft a low-GI, single-serving recipe for you."
 
     async def ContinueQuery(self, user_input: str) -> bool:
         self.conversation_history.append(user_input)
@@ -304,18 +310,15 @@ class AIQuery:
             notify=notify,
         )
 
-        loop = asyncio.get_running_loop()
-        self._pipeline_task = loop.create_task(
-            asyncio.to_thread(
-                run_food_analysis_pipeline,
-                ai_query=self,
-                client=self._client,
-                prompts=prompts,
-                request_context=self._request_context,
-                storage_dir=self._storage_dir,
-            )
+        self._pipeline_task = None
+        await asyncio.to_thread(
+            run_food_analysis_pipeline,
+            ai_query=self,
+            client=self._client,
+            prompts=prompts,
+            request_context=self._request_context,
+            storage_dir=self._storage_dir,
         )
-        await self._pipeline_task
 
     def _prefill_saved_health_profile(self) -> None:
         profile_path = self._storage_dir / f"{self.user_id}.json"
@@ -534,6 +537,23 @@ class AIQuery:
         required: bool,
     ) -> QuestionEvaluation:
         stripped = user_input.strip()
+        if key == "desired_food":
+            if not stripped and required:
+                field_label = key.replace("_", " ")
+                return QuestionEvaluation(
+                    question=key,
+                    ask_again=True,
+                    explanation=f"Please provide your {field_label}.",
+                    accepted_value="",
+                )
+            return QuestionEvaluation(
+                question=key,
+                ask_again=False,
+                accepted_value=stripped,
+                explanation=None,
+                next_question=None,
+            )
+
         if not stripped:
             if required:
                 field_label = key.replace("_", " ")

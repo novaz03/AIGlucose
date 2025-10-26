@@ -47,7 +47,6 @@ class GeminiClient(LLMClientBase):
 
         if request_context.response_format:
             generation_config.setdefault("response_mime_type", "application/json")
-            response_kwargs.setdefault("response_schema", request_context.response_format)
 
         safety_settings = extra_options.pop("safety_settings", self._default_safety_settings)
 
