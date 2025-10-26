@@ -9,7 +9,7 @@
     "noEmit": true,
     "esModuleInterop": true,
     "noImplicitAny": false,
-    "module": "ESNext",
+    "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "resolveJsonModule": true,
     "isolatedModules": true,
