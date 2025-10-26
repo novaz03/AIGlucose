@@ -476,7 +476,14 @@ def api_predict():
 @app.post("/api/send")
 @cross_origin(origins=list(frontend_origins), supports_credentials=True)
 def api_send():
-    st = _get_state(create_if_missing=False)
+    st = _get_state(create_if_missing=True)
+    # If this worker hasn't seen the conversation yet, recreate the query when possible
+    if st and not st.query and st.user_id is not None:
+        try:
+            st.query = AIQuery(st.user_id)
+            st.finished = False
+        except Exception as exc:
+            return jsonify({"messages": [{"type": "system", "role": "System", "text": f"Failed to start session: {exc}"}]}), 500
     if not st or not st.query:
         return jsonify({"messages": [{"type": "system", "role": "System", "text": "No active session."}]}), 400
     if st.finished:
@@ -497,17 +504,26 @@ def api_send():
 
     messages: List[Dict[str, Any]] = []
 
-    keep = asyncio.run(st.query.ContinueQuery(msg))
+    try:
+        keep = asyncio.run(st.query.ContinueQuery(msg))
+    except Exception as exc:
+        return jsonify({"messages": [{"type": "system", "role": "System", "text": f"Sorry, I couldn't process that: {exc}"}]}), 200
     if not keep:
         closing = asyncio.run(st.query.Closing())
         messages.append({"type": "chat", "role": "AI", "text": closing})
 
-    body = asyncio.run(st.query.QueryBody())
+    try:
+        body = asyncio.run(st.query.QueryBody())
+    except Exception as exc:
+        body = f"I hit a snag generating the next step: {exc}"
     messages.append({"type": "chat", "role": "AI", "text": body})
 
     is_finished = not getattr(st.query, "_active", True)
     if is_finished:
-        payload = asyncio.run(st.query.RequestResult())
+        try:
+            payload = asyncio.run(st.query.RequestResult())
+        except Exception as exc:
+            payload = {"message": f"Pipeline finished but result retrieval failed: {exc}"}
         st.query = None
         st.finished = True
         return jsonify({"messages": messages, "finished": True, "result": payload})

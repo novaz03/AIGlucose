@@ -406,7 +406,7 @@ function MeasurementField<T extends HeightUnit | WeightUnit>({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           disabled={disabled}
-          className="h-14 w-full rounded-2xl border border-white/60 bg-[#edf1f9] text-base text-slate-800 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-emerald-400"
+          className="h-16 w-full rounded-2xl border border-white/60 bg-[#edf1f9] text-lg text-slate-800 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-emerald-400"
         />
         </div>
         <UnitToggle
@@ -452,7 +452,7 @@ function SimpleField({
           value={value}
           onChange={(event) => onChange(event.target.value)}
           disabled={disabled}
-          className="h-14 w-full rounded-2xl border border-white/60 bg-[#edf1f9] text-base text-slate-800 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-emerald-400"
+          className={`${id === "age" ? "h-12" : "h-14"} w-full rounded-2xl border border-white/60 bg-[#edf1f9] text-base text-slate-800 placeholder:text-slate-400 focus-visible:ring-2 focus-visible:ring-emerald-400`}
         />
         {suffix ? (
           <span className="pointer-events-none absolute right-4 text-xs font-semibold uppercase text-slate-400">
