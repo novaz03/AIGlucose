@@ -29,3 +29,4 @@ pdfminer-six==20250506
 pdfplumber==0.11.7
 gunicorn
 dotenv
+Flask-Cors
