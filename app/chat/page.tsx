@@ -136,9 +136,7 @@ function ChatPageContent() {
           setRecipe(null);
           const normalized = message.toLowerCase();
           if (normalized.includes("not authenticated") || normalized.includes("not logged")) {
-            redirectTimer = window.setTimeout(() => {
-              router.replace("/login");
-            }, 1200);
+            router.replace("/login");
           }
           setIsLoading(false);
         }
