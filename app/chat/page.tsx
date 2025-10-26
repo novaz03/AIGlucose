@@ -97,7 +97,7 @@ function ChatPageContent() {
       const greetingMessages = Array.isArray(greetingData.messages)
         ? greetingData.messages
           .map((msg: any) => String(msg?.text ?? ""))
-          .filter((txt) => txt.trim().length > 0)
+          .filter((txt: string) => txt.trim().length > 0)
         : [];
       setSessionError(null);
       appendAssistantMessages(greetingMessages.map((text) => ({ text })));
