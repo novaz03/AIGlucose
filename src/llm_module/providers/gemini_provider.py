@@ -73,19 +73,14 @@ class GeminiClient(LLMClientBase):
                     prompt,
                     **response_kwargs,
                 )
-            except TypeError as te:
-                # Fallback for SDKs that don't support response_schema/response_mime_type
-                msg = str(te)
-                unsupported_keys = []
-                if "response_schema" in response_kwargs and "response_schema" in msg:
-                    unsupported_keys.append("response_schema")
-                if "response_mime_type" in response_kwargs and "response_mime_type" in msg:
-                    unsupported_keys.append("response_mime_type")
-                for key in unsupported_keys:
-                    response_kwargs.pop(key, None)
+            except TypeError:
+                # Older SDKs may not support response_schema/response_mime_type.
+                # Remove them unconditionally and guide the model via prompt.
+                had_schema = bool(request_context.response_format)
+                response_kwargs.pop("response_schema", None)
+                response_kwargs.pop("response_mime_type", None)
 
-                # If schema enforcement isn't supported, embed the schema into the prompt
-                if unsupported_keys and request_context.response_format:
+                if had_schema and request_context.response_format:
                     schema_text = json.dumps(request_context.response_format, indent=2)
                     if system_prompt:
                         system_prompt = (
