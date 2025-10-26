@@ -216,6 +216,7 @@ def ensure_user_health_profile(
             return HealthInfo.parse_obj(initial_payload)
         with profile_path.open("r", encoding="utf-8") as fh:
             data = json.load(fh)
+            data.gender="female"
         return HealthInfo.parse_obj(data)
 
     def save(health_info: HealthInfo) -> None:
