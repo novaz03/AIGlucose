@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
 from .models import FoodAnalysisResponse, LLMRequestContext
+from .utils import strip_json_code_fence
 
 
 class LLMClientError(RuntimeError):
@@ -64,7 +65,7 @@ def default_parser() -> StructuredResponseParser:
     class _Parser:
         def parse(self, raw_output: str) -> FoodAnalysisResponse:  # noqa: D401
             try:
-                payload: Dict[str, Any] = json.loads(raw_output)
+                payload: Dict[str, Any] = json.loads(strip_json_code_fence(raw_output))
             except json.JSONDecodeError as exc:  # pragma: no cover - defensive
                 raise ValueError(f"Expected JSON string from LLM, received: {raw_output}") from exc
 

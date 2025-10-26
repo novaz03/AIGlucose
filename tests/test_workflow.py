@@ -17,6 +17,7 @@ from ai_query_interface import (
     PROFILE_UPDATE_PROMPT_CHOICE,
     PROFILE_UPDATE_DETAILS_PROMPT_TEXT,
     PROFILE_UPDATE_FOLLOWUP_PROMPT_TEXT,
+    PROFILE_UPDATE_AWAITING_DECISION,
     AIQuery,
 )
 from src.llm_module import workflow
@@ -88,17 +89,11 @@ async def test_ai_query_immediate_profile_update_flow(tmp_path):
     prompt = await query.QueryBody()
     assert "review or update" in prompt.lower()
 
-    # User agrees to update
-    await query.ContinueQuery("yes")
-    # Message queue should contain the acknowledgement prior to the details prompt
-    follow_up = await query.QueryBody()
-    assert "great" in follow_up.lower()
-
-    next_prompt = await query.QueryBody()
-    assert PROFILE_UPDATE_DETAILS_PROMPT_TEXT.lower() in next_prompt.lower()
+    # Assistant should wait for a user decision
+    assert not query._message_queue
 
     # LLM suggests updating weight with raw/accepted values
-    llm_payload = json.dumps(
+    llm_payload = fenced_json(
         {
             "updates": [
                 {
@@ -110,6 +105,16 @@ async def test_ai_query_immediate_profile_update_flow(tmp_path):
         }
     )
     query._client = StubClient(payload=llm_payload)
+
+    # User agrees to update
+    await query.ContinueQuery("yes")
+
+    # Assistant acknowledges and asks for details
+    follow_up = await query.QueryBody()
+    assert "great" in follow_up.lower()
+
+    next_prompt = await query.QueryBody()
+    assert PROFILE_UPDATE_DETAILS_PROMPT_TEXT.lower() in next_prompt.lower()
 
     # User says weight is 120 kg
     await query.ContinueQuery("weight is 120 kg")
@@ -239,13 +244,17 @@ class StubClient:
         return self.payload
 
 
+def fenced_json(payload: dict[str, object]) -> str:
+    return "```json\n" + json.dumps(payload) + "\n```"
+
+
 @pytest.mark.anyio
 async def test_continue_query_accepts_llm_validation(tmp_path):
     query = AIQuery(101, storage_dir=tmp_path)
     prompt = await query.QueryBody()
     assert "age" in prompt
 
-    stub_response = json.dumps(
+    stub_response = fenced_json(
         {
             "question": "age",
             "ask_again": False,
@@ -268,7 +277,7 @@ async def test_continue_query_requests_retry_when_llm_flags_issue(tmp_path):
     query = AIQuery(102, storage_dir=tmp_path)
     await query.QueryBody()
 
-    stub_response = json.dumps(
+    stub_response = fenced_json(
         {
             "question": "age",
             "ask_again": True,

@@ -16,6 +16,15 @@ from .models import (
     MealIntent,
     UserContext,
 )
+from .question_bank import (
+    HEALTH_FIELD_MAPPING,
+    HEALTH_QUESTION_ORDER,
+    HEALTH_REQUIRED_RETRY_MESSAGES,
+    MEAL_QUESTION_KEYS,
+    QUESTION_SPECS,
+    QUESTION_SPEC_BY_KEY,
+    REQUIRED_HEALTH_KEYS,
+)
 from .responses import (
     LLM_STUDIO_RESPONSE_SCHEMA,
     build_system_prompt,
@@ -96,8 +105,15 @@ __all__ = [
     "collect_user_context",
     "create_client",
     "create_session_manager",
+    "HEALTH_FIELD_MAPPING",
+    "HEALTH_QUESTION_ORDER",
+    "HEALTH_REQUIRED_RETRY_MESSAGES",
+    "MEAL_QUESTION_KEYS",
     "default_parser",
     "ensure_user_health_profile",
     "run_food_analysis_pipeline",
+    "QUESTION_SPECS",
+    "QUESTION_SPEC_BY_KEY",
+    "REQUIRED_HEALTH_KEYS",
 ]
 
