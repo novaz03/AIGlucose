@@ -36,6 +36,16 @@ from src.llm_module.workflow import (
     create_gemini_components,
 )
 
+from dotenv import load_dotenv
+load_dotenv()
+import google.generativeai as genai
+import logging
+
+logging.basicConfig(
+    filename="server.log",  # 不写就默认 stdout
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +67,13 @@ def _parse_json_dict(raw: Optional[str]) -> dict[str, Any]:
 
 def _build_llm_configuration() -> tuple[Any, LLMRequestContext]:
     provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower() or "gemini"
+    logger.info("Resolved LLM provider: %s", provider)
     request_extra_options = _parse_json_dict(os.getenv("LLM_EXTRA_OPTIONS"))
     client_kwargs: dict[str, Any] = {}
-
+    load_dotenv()
     if provider == "gemini":
         model_name = os.getenv("LLM_MODEL") or DEFAULT_GEMINI_MODEL
-
+        api_key = os.getenv("GEMINI_API_KEY")
         generation_overrides = _parse_json_dict(os.getenv("GEMINI_GENERATION_CONFIG"))
         safety_settings_raw = os.getenv("GEMINI_SAFETY_SETTINGS")
         safety_settings = None
@@ -73,7 +84,6 @@ def _build_llm_configuration() -> tuple[Any, LLMRequestContext]:
                 logger.warning("Invalid JSON for GEMINI_SAFETY_SETTINGS; ignoring value.")
 
         client, request_context = create_gemini_components(
-            api_key=os.getenv("GEMINI_API_KEY"),
             model_name=model_name,
             generation_config_overrides=generation_overrides or None,
             safety_settings=safety_settings,
@@ -140,6 +150,7 @@ class AIQuery:
     """
 
     def __init__(self, user_id: int, *, storage_dir: Optional[Path] = None) -> None:
+        logger.info("Initialising AIQuery for user_id=%s", user_id)
         self.user_id = user_id
         self.conversation_history = []
         self._active = True

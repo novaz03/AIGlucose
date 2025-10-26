@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Optional, Any, Dict, List
 
 from flask import Flask, request, session, redirect, url_for, jsonify, render_template
+from flask_cors import CORS, cross_origin
 
 # Your existing modules (unchanged)
 from ai_query_interface import AIQuery
@@ -188,6 +189,16 @@ def _get_state(create_if_missing: bool = True) -> Optional[SessionState]:
 app = Flask(__name__)
 app.secret_key = "dev-glucose-chef-secret"
 
+frontend_origins = {
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+}
+CORS(
+    app,
+    resources={r"/api/*": {"origins": list(frontend_origins)}},
+    supports_credentials=True,
+)
+
 
 @app.get("/")
 def login_page():
@@ -196,14 +207,19 @@ def login_page():
 
 
 @app.post("/api/login")
+@cross_origin(origins=list(frontend_origins), supports_credentials=True)
 def api_login():
     data = request.get_json(silent=True) or {}
+    app.logger.info("Login payload: %r", data)
     user_id = str(data.get("user_id", "")).strip()
     if not user_id.isdigit():
         return jsonify({"ok": False, "error": "User ID must be numeric."}), 400
 
     st = _get_state(create_if_missing=True)
-    st.query = AIQuery(int(user_id))
+    try:
+        st.query = AIQuery(int(user_id))
+    except Exception as e:
+        return jsonify({"ok": False, "error": f"AI service failed to initialize: {e}"}), 500
     st.finished = False
     return jsonify({"ok": True})
 
@@ -217,6 +233,7 @@ def chat_page():
 
 
 @app.post("/api/greet")
+@cross_origin(origins=list(frontend_origins), supports_credentials=True)
 def api_greet():
     st = _get_state(create_if_missing=False)
     if not st:
@@ -233,6 +250,7 @@ def api_greet():
 
 
 @app.post("/api/send")
+@cross_origin(origins=list(frontend_origins), supports_credentials=True)
 def api_send():
     st = _get_state(create_if_missing=False)
     if not st or not st.query:

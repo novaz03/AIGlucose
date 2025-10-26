@@ -5,3 +5,6 @@ __pycache__/
 .vscode/
 *.pkl
 .env
+.next/
+node_modules/
+server.log
