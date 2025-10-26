@@ -1,5 +1,5 @@
 
-const API_BASE_URL = 'https://aiglucose.onrender.com';
+const API_BASE_URL = 'http://34.66.204.223';
 
 export async function login(userId: string) {
   const response = await fetch(`${API_BASE_URL}/api/login`, {
