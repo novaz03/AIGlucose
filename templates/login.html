@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>AI Glucose - Login</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #f6f7fb; margin:0; padding:0; }
+    .card { max-width: 420px; margin: 8vh auto; background: #fff; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.08); padding: 24px; }
+    h1 { margin: 0 0 12px 0; font-size: 22px; }
+    p { color:#555; margin: 4px 0 18px 0; }
+    input, button { width: 100%; padding: 12px 14px; font-size: 16px; border-radius: 10px; border: 1px solid #d9dbe3; outline: none; }
+    input:focus { border-color: #6b7cff; box-shadow: 0 0 0 3px rgba(107,124,255,0.15); }
+    button { background: #6b7cff; color: #fff; border: none; cursor: pointer; margin-top: 12px; }
+    button:disabled { background:#a7afff; cursor:not-allowed; }
+    .hint { font-size: 13px; color:#888; margin-top:10px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>AI Glucose — Login</h1>
+    <p>Enter your numeric User ID to start.</p>
+    <input id="userid" type="text" placeholder="User ID (numbers only)" />
+    <button id="loginBtn">Login</button>
+    <div class="hint">After login, you will be redirected to the chat page.</div>
+  </div>
+
+<script>
+document.getElementById("loginBtn").addEventListener("click", async () => {
+  const uid = document.getElementById("userid").value.trim();
+  if (!/^[0-9]+$/.test(uid)) { alert("Please enter a numeric User ID."); return; }
+  const res = await fetch("/api/login", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ user_id: uid })
+  });
+  if (res.ok) {
+    window.location.href = "/chat";
+  } else {
+    alert("Login failed.");
+  }
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,138 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>AI Glucose - Chat</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; background: #f6f7fb; margin:0; padding:0; }
+    .wrap { max-width: 920px; margin: 4vh auto; padding: 0 16px; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+    .topbar h1 { margin:0; font-size:20px; }
+    .status { font-size:13px; color:#666; }
+    .panel { background:#fff; border-radius: 12px; box-shadow: 0 6px 20px rgba(0,0,0,0.08); padding: 16px; }
+    .log { height: 56vh; overflow:auto; border:1px solid #e6e8f0; border-radius:10px; padding:12px; background:#fafbff; }
+    .msg { margin:8px 0; }
+    .msg .role { font-weight:600; }
+    .controls { display:flex; gap:10px; margin-top:12px; }
+    textarea { flex:1; resize: vertical; min-height:44px; max-height:200px; padding:10px 12px; font-size:15px; border-radius:10px; border:1px solid #d9dbe3; outline:none; }
+    textarea:focus { border-color:#6b7cff; box-shadow: 0 0 0 3px rgba(107,124,255,0.15); }
+    button { padding: 12px 16px; font-size: 15px; border-radius: 10px; border:none; background:#6b7cff; color:#fff; cursor:pointer; }
+    button:disabled { background:#a7afff; cursor:not-allowed; }
+    .system { color:#7b7b7b; }
+    .result { background:#eef3ff; padding:8px 10px; border-radius:8px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <h1>AI Glucose — Chat</h1>
+      <div class="status" id="status">Idle</div>
+    </div>
+
+    <div class="panel">
+      <div id="log" class="log"></div>
+      <div class="controls">
+        <textarea id="input" placeholder="Type your message..."></textarea>
+        <button id="sendBtn">Send</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+const logEl = document.getElementById("log");
+const inputEl = document.getElementById("input");
+const sendBtn = document.getElementById("sendBtn");
+const statusEl = document.getElementById("status");
+let aiBusy = false;
+let sessionFinished = false;
+
+function append(role, text, klass="") {
+  const div = document.createElement("div");
+  div.className = "msg " + klass;
+  const roleSpan = document.createElement("span");
+  roleSpan.className = "role";
+  roleSpan.textContent = role + ": ";
+  const textSpan = document.createElement("span");
+  textSpan.textContent = text;
+  div.appendChild(roleSpan);
+  div.appendChild(textSpan);
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function appendResult(text) {
+  const div = document.createElement("div");
+  div.className = "msg result";
+  div.textContent = "[Result] " + text;
+  logEl.appendChild(div);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setBusy(b) {
+  aiBusy = b;
+  sendBtn.disabled = b || sessionFinished;
+  statusEl.textContent = b ? "AI is typing..." : (sessionFinished ? "Session finished" : "Idle");
+}
+
+async function greet() {
+  setBusy(true);
+  const res = await fetch("/api/greet", { method: "POST" });
+  if (res.ok) {
+    const data = await res.json();
+    for (const item of data.messages) {
+      if (item.type === "system") append("System", item.text, "system");
+      else append(item.role, item.text);
+    }
+  } else {
+    append("System", "Failed to get greeting.", "system");
+  }
+  setBusy(false);
+}
+
+async function send() {
+  if (aiBusy || sessionFinished) return;
+  const msg = inputEl.value.trim();
+  if (!msg) return;
+  inputEl.value = "";
+  append("You", msg);
+  setBusy(true);
+  const res = await fetch("/api/send", {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ message: msg })
+  });
+  if (res.ok) {
+    const data = await res.json();
+    for (const item of data.messages) {
+      if (item.type === "result") {
+        appendResult(item.text);
+      } else {
+        append(item.role, item.text);
+      }
+    }
+    if (data.finished) {
+      sessionFinished = true;
+      setBusy(false);
+      sendBtn.disabled = true;
+      statusEl.textContent = "Session finished";
+      return;
+    }
+  } else {
+    append("System", "Send failed.", "system");
+  }
+  setBusy(false);
+}
+
+sendBtn.addEventListener("click", send);
+inputEl.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+
+greet();
+</script>
+</body>
+</html>
