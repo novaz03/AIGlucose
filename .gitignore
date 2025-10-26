@@ -3,7 +3,6 @@ __pycache__/
 .vs/
 user_data/
 .vscode/
-*.pkl
 .env
 .next/
 node_modules/
