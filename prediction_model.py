@@ -13,7 +13,59 @@ import pandas as pd
 import joblib
 import matplotlib.pyplot as plt
 
+"""PredictionModel: Sklearn Pipeline backend for CGMacros glucose curve prediction.
+Usage:
 
+    model = PredictionModel(artifact="path/to/model_dir_or_pkl",
+                            n_jobs_targets=4, n_jobs_trees=1)
+
+    # Single prediction
+    payload = {
+        "meal_bucket": "Lunch",
+        "baseline_avg_glucose": 110.0,
+        "meal_calories": 600,
+        "carbs_g": 75,
+        "protein_g": 25,
+        "fat_g": 20,
+        "fiber_g": 8,
+        "amount_consumed": 1.0,
+        "Age":  45,
+        "Gender": "Female",
+        "Body weight": 150,
+        "Height": 65,
+        "activity_cal_mean": 250,
+        "mets_mean": 1.5,
+        "return_plot": True,
+        "return_csv": True
+    }
+    result_json = await model.predict(payload)  # async method 
+
+    # Batch prediction
+    payloads = [payload1, payload2, ...]
+    batch_result_json = await model.predict_many(payloads)
+    
+    # Quick test:
+    import json
+    from prediction_model import PredictionModel
+
+    model = PredictionModel(artifact="ml_outputs_mlcurve_rf", output_dir="pred_outputs")
+
+    batch = [
+        {"meal_bucket":"Breakfast","baseline_avg_glucose":95,  "carbs_g":60, "return_csv": True},
+        {"meal_bucket":"Lunch",    "baseline_avg_glucose":110, "carbs_g":75},
+        {"meal_bucket":"Dinner",   "baseline_avg_glucose":125, "carbs_g":80, "protein_g":30, "return_plot": True},
+        {"meal_bucket":"Snacks",   "baseline_avg_glucose":100, "carbs_g":30, "fiber_g":8}
+    ]
+
+    res = json.loads(await model.predict_many(batch))
+    print("Items:", len(res["items"]))
+    for i, item in enumerate(res["items"]):
+        print(i, "image_path:", item.get("image_path"), "| json_path:", item.get("json_path"))
+        if "csv" in item:  # you asked for return_csv on item 0
+            with open(item.get("csv_filename","curve.csv"), "w", encoding="utf-8") as f:
+                f.write(item["csv"])
+
+"""
 # ----------------------------- helpers -----------------------------
 def _bucket_meal_type(x: object) -> str:
     s = (str(x) if x is not None else "").strip().lower()
