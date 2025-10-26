@@ -41,6 +41,12 @@ const UNDERLYING_DISEASE_OPTIONS: Array<{ label: string; value: string }> = [
   { label: "Healthy Mode", value: "Healthy Mode" }
 ];
 
+const GENDER_OPTIONS: Array<{ label: string; value: string }> = [
+  { label: "Female", value: "female" },
+  { label: "Male", value: "male" },
+  { label: "Other / Prefer not to say", value: "other" },
+];
+
 export default function ProfilePage() {
   return (
     <section className="space-y-8">
@@ -69,7 +75,7 @@ export default function ProfilePage() {
 function ProfileForm() {
   const router = useRouter();
   const {
-    metrics: { age, height, weight, heightUnit, weightUnit, a1c, underlyingDisease },
+    metrics: { age, height, weight, gender, heightUnit, weightUnit, a1c, underlyingDisease },
     updateMetrics
   } = useUser();
 
@@ -77,6 +83,7 @@ function ProfileForm() {
   const [heightValue, setHeightValue] = useState("");
   const [weightValue, setWeightValue] = useState("");
   const [a1cValue, setA1cValue] = useState("");
+  const [genderValue, setGenderValue] = useState("");
   const [diseaseValue, setDiseaseValue] = useState("");
   const [heightUnitState, setHeightUnitState] = useState<HeightUnit>("cm");
   const [weightUnitState, setWeightUnitState] = useState<WeightUnit>("kg");
@@ -99,6 +106,7 @@ function ProfileForm() {
           age: typeof profile.age === "number" ? profile.age : null,
           height: typeof profile.height_cm === "number" ? profile.height_cm : null,
           weight: typeof profile.weight_kg === "number" ? profile.weight_kg : null,
+          gender: typeof profile.gender === "string" ? profile.gender : null,
           underlyingDisease: profile.underlying_disease ?? null
         });
         setErrorMessage(null);
@@ -153,7 +161,8 @@ function ProfileForm() {
     );
     setA1cValue(a1c != null ? formatInputForField(a1c, 1) : "");
     setDiseaseValue(underlyingDisease ?? "");
-  }, [age, height, weight, heightUnit, weightUnit, a1c, underlyingDisease]);
+    setGenderValue(gender ?? "");
+  }, [age, height, weight, heightUnit, weightUnit, a1c, underlyingDisease, gender]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -202,6 +211,7 @@ function ProfileForm() {
         age: Math.round(parsedAge),
         height_cm: heightInCm,
         weight_kg: weightInKg,
+        gender: genderValue || null,
         underlying_disease: diseaseValue,
       });
 
@@ -209,6 +219,7 @@ function ProfileForm() {
         age: typeof savedProfile.age === "number" ? savedProfile.age : Math.round(parsedAge),
         height: typeof savedProfile.height_cm === "number" ? savedProfile.height_cm : heightInCm,
         weight: typeof savedProfile.weight_kg === "number" ? savedProfile.weight_kg : weightInKg,
+        gender: typeof savedProfile.gender === "string" ? savedProfile.gender : (genderValue || null),
         heightUnit: heightUnitState,
         weightUnit: weightUnitState,
         a1c: Number.isFinite(parsedA1c) ? parsedA1c : null,
@@ -294,26 +305,34 @@ function ProfileForm() {
               unitOptions={HEIGHT_UNIT_OPTIONS}
               disabled={isBusy}
             />
-            <MeasurementField
-              id="weight"
-              label="Weight"
-              placeholder={weightUnitState === "lb" ? "e.g. 132" : "e.g. 60"}
-              value={weightValue}
-              onChange={setWeightValue}
-              unitValue={weightUnitState}
-              onUnitChange={handleWeightUnitChange}
-              unitOptions={WEIGHT_UNIT_OPTIONS}
-              disabled={isBusy}
-            />
-            <SimpleField
-              id="a1c"
-              label="A1c"
-              placeholder="e.g. 5.4"
-              value={a1cValue}
-              onChange={setA1cValue}
-              suffix="%"
-              disabled={isBusy}
-            />
+          <MeasurementField
+            id="weight"
+            label="Weight"
+            placeholder={weightUnitState === "lb" ? "e.g. 132" : "e.g. 60"}
+            value={weightValue}
+            onChange={setWeightValue}
+            unitValue={weightUnitState}
+            onUnitChange={handleWeightUnitChange}
+            unitOptions={WEIGHT_UNIT_OPTIONS}
+            disabled={isBusy}
+          />
+          <SelectField
+            id="gender"
+            label="Gender"
+            value={genderValue}
+            onChange={setGenderValue}
+            options={GENDER_OPTIONS}
+            disabled={isBusy}
+          />
+          <SimpleField
+            id="a1c"
+            label="A1c"
+            placeholder="e.g. 5.4"
+            value={a1cValue}
+            onChange={setA1cValue}
+            suffix="%"
+            disabled={isBusy}
+          />
           </div>
 
           <SelectField
@@ -524,7 +543,7 @@ function SelectField({
 
 function StatusPreview() {
   const {
-    metrics: { age, height, weight, heightUnit, weightUnit, a1c, underlyingDisease }
+    metrics: { age, height, weight, gender, heightUnit, weightUnit, a1c, underlyingDisease }
   } = useUser();
 
   return (
@@ -540,6 +559,7 @@ function StatusPreview() {
         </CardHeader>
         <CardContent className="mt-8 grid gap-6 p-0">
           <MetricBadge label="Age" value={formatAge(age)} />
+          <MetricBadge label="Gender" value={formatGender(gender)} />
           <MetricBadge
             label="Height"
             value={formatHeight(height, heightUnit)}
@@ -577,6 +597,17 @@ function formatAge(age: number | null) {
     return "-";
   }
   return `${Math.round(age)} yrs`;
+}
+
+function formatGender(value: string | null) {
+  if (!value) {
+    return "-";
+  }
+  const s = value.trim();
+  if (!s) {
+    return "-";
+  }
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function formatUnderlyingDisease(value: string | null) {

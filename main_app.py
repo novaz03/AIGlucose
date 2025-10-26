@@ -338,12 +338,21 @@ def api_update_profile():
     repo, _ = ensure_user_health_profile(user_id=st.user_id, storage_dir=USER_DATA_DIR)
     existing = repo.load() or HealthInfo()
 
+    raw_gender = data.get("gender")
+    if raw_gender is not None:
+        gender = str(raw_gender).strip()
+        if not any(ch.isalpha() for ch in gender):
+            return jsonify({"ok": False, "error": "Invalid gender."}), 400
+    else:
+        gender = existing.gender
+
     updated = existing.model_copy(
         update={
             "age": age,
             "height_cm": height_cm,
             "weight_kg": weight_kg,
             "underlying_disease": underlying_disease,
+            "gender": gender,
         }
     )
 
@@ -482,6 +491,7 @@ def _serialize_health_info(info: HealthInfo) -> Dict[str, Any]:
         "age": info.age,
         "height_cm": info.height_cm,
         "weight_kg": info.weight_kg,
+        "gender": (info.gender or None),
         "underlying_disease": disease,
     }
 

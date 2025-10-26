@@ -49,6 +49,7 @@ type ProfileResponse = {
     age: number | null;
     height_cm: number | null;
     weight_kg: number | null;
+    gender: string | null;
     underlying_disease: string | null;
   };
   error?: string;
@@ -80,13 +81,18 @@ export async function fetchProfile() {
   if (!response.ok || !data.ok || !data.profile) {
     throw new Error(data.error || 'Failed to load profile');
   }
-  return data.profile;
+  // Normalise gender to a lowercase string or null
+  const gender = typeof data.profile.gender === 'string' && data.profile.gender.trim().length > 0
+    ? data.profile.gender.trim().toLowerCase()
+    : null;
+  return { ...data.profile, gender };
 }
 
 export async function updateProfile(payload: {
   age: number;
   height_cm: number;
   weight_kg: number;
+  gender?: string | null;
   underlying_disease: string;
 }) {
   const response = await fetch(`/api/profile`, {

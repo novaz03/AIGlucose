@@ -16,6 +16,7 @@ export type UserMetrics = {
   age: number | null;
   height: number | null;
   weight: number | null;
+  gender: string | null;
   heightUnit: HeightUnit;
   weightUnit: WeightUnit;
   a1c: number | null;
@@ -34,6 +35,7 @@ export function UserProvider({ children }: { children: ReactNode }) {
     age: null,
     height: null,
     weight: null,
+    gender: null,
     heightUnit: "cm",
     weightUnit: "kg",
     a1c: null,

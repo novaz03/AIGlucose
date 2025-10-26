@@ -38,7 +38,7 @@ function toNumber(value: unknown): number | null {
 
 export default function DashboardPage() {
   const {
-    metrics: { age, height, weight, underlyingDisease },
+    metrics: { age, height, weight, gender, underlyingDisease },
     updateMetrics
   } = useUser();
 
@@ -113,7 +113,8 @@ export default function DashboardPage() {
         const forecast = await fetchForecast({
           height_cm: height,
           weight_kg: weight,
-          age: age ?? undefined
+          age: age ?? undefined,
+          gender: gender ?? undefined,
         });
         if (cancelled) {
           return;
@@ -165,7 +166,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [age, height, weight]);
+  }, [age, height, weight, gender]);
 
   const yDomain = useMemo<[number, number]>(() => {
     if (!chartPoints.length) {
