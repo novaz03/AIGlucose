@@ -100,7 +100,7 @@ function ChatPageContent() {
           .filter((txt: string) => txt.trim().length > 0)
         : [];
       setSessionError(null);
-      appendAssistantMessages(greetingMessages.map((text) => ({ text })));
+      appendAssistantMessages(greetingMessages.map((text: string) => ({ text })));
       setIsSessionActive(true);
     } catch (error) {
       console.error("Failed to reinitialise session:", error);
