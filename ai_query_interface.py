@@ -188,7 +188,7 @@ class AIQuery:
         self._ready_for_pipeline = False
 
     async def Greeting(self) -> str:
-        return "Hi there! Share a dish name or list of ingredients and I'll craft a low-GI, single-serving recipe for you."
+        return ""
 
     async def ContinueQuery(self, user_input: str) -> bool:
         self.conversation_history.append(user_input)

@@ -24,11 +24,40 @@ type RecipePayload = {
   steps: string[];
 };
 
-type Message = {
+type AssistantMessage = {
   id: string;
-  role: "user" | "assistant";
+  role: "assistant";
+  text?: string;
+  recipe?: RecipePayload;
+};
+
+type UserMessage = {
+  id: string;
+  role: "user";
   text: string;
 };
+
+type Message = AssistantMessage | UserMessage;
+
+type AssistantMessageInput = {
+  text?: string;
+  recipe?: RecipePayload;
+};
+
+function isPopulatedAssistantEntry(entry: AssistantMessageInput): entry is AssistantMessageInput & { text?: string; recipe: RecipePayload } | AssistantMessageInput & { text: string } {
+  const normalizedText = typeof entry.text === "string" ? entry.text.trim() : "";
+  return normalizedText.length > 0 || Boolean(entry.recipe);
+}
+
+function normalizeAssistantEntry(entry: AssistantMessageInput): AssistantMessage {
+  const normalizedText = typeof entry.text === "string" ? entry.text.trim() : "";
+  return {
+    id: createMessageId(),
+    role: "assistant",
+    ...(normalizedText.length > 0 ? { text: normalizedText } : {}),
+    ...(entry.recipe ? { recipe: entry.recipe } : {}),
+  };
+}
 
 function ChatPageContent() {
   const router = useRouter();
@@ -40,17 +69,22 @@ function ChatPageContent() {
   const [sessionError, setSessionError] = useState<string | null>(null);
   const [recipe, setRecipe] = useState<RecipePayload | null>(null);
 
-  const appendAssistantMessages = (texts: string[]) => {
-    if (texts.length === 0) {
+  const appendAssistantMessages = (entries: AssistantMessageInput[]) => {
+    if (entries.length === 0) {
       return;
     }
+
+    const normalized = entries
+      .filter(isPopulatedAssistantEntry)
+      .map(normalizeAssistantEntry);
+
+    if (normalized.length === 0) {
+      return;
+    }
+
     setMessages((prev) => [
       ...prev,
-      ...texts.map((text) => ({
-        id: createMessageId(),
-        role: "assistant",
-        text,
-      })),
+      ...normalized,
     ]);
   };
 
@@ -66,7 +100,7 @@ function ChatPageContent() {
           .filter((txt) => txt.trim().length > 0)
         : [];
       setSessionError(null);
-      appendAssistantMessages(greetingMessages);
+      appendAssistantMessages(greetingMessages.map((text) => ({ text })));
       setIsSessionActive(true);
     } catch (error) {
       console.error("Failed to reinitialise session:", error);
@@ -117,14 +151,29 @@ function ChatPageContent() {
           return;
         }
         if (greetingData.messages) {
-          const assistantMessages: Message[] = greetingData.messages
+          const assistantMessages: AssistantMessage[] = [];
+          greetingData.messages
             .map((msg: any) => String(msg.text ?? ""))
-            .filter((txt: string) => txt.trim().length > 0)
-            .map((text: string) => ({
-              id: createMessageId(),
-              role: "assistant",
-              text,
-            }));
+            .forEach((rawText: string) => {
+              const text = rawText.trim();
+              if (!text) {
+                return;
+              }
+              const recipeFromText = parseRecipeText(text);
+              if (recipeFromText) {
+                assistantMessages.push({
+                  id: createMessageId(),
+                  role: "assistant",
+                  recipe: recipeFromText,
+                });
+              } else {
+                assistantMessages.push({
+                  id: createMessageId(),
+                  role: "assistant",
+                  text,
+                });
+              }
+            });
           setMessages(assistantMessages);
         }
         setIsSessionActive(true);
@@ -169,40 +218,43 @@ function ChatPageContent() {
 
     try {
       const response = await sendMessage(trimmed);
-      const incoming: Message[] = [];
-      const assistantMessages: string[] = [];
+      const assistantEntries: AssistantMessageInput[] = [];
 
-      // Step 1: collect plain-text assistant messages
+      // Step 1: collect assistant messages and attempt to parse any embedded recipes
       if (Array.isArray(response.messages)) {
         response.messages.forEach((msg: any) => {
           const text = String(msg?.text ?? "").trim();
           if (text) {
-            assistantMessages.push(text);
+            const recipeFromText = parseRecipeText(text);
+            if (recipeFromText) {
+              assistantEntries.push({ recipe: recipeFromText });
+            } else {
+              assistantEntries.push({ text });
+            }
           }
         });
       }
 
-      // Step 2: pull the structured recipe and format it for display
+      // Step 2: pull the structured recipe for card rendering
       const recipePayload = extractRecipeFromResponse(response);
       if (recipePayload) {
         setRecipe(recipePayload); // update the recipe panel on the right
-        const recipeText = formatRecipe(recipePayload);
-        assistantMessages.push(recipeText);
+        const alreadyHasRecipeCard = assistantEntries.some((entry) => Boolean(entry.recipe));
+        if (!alreadyHasRecipeCard) {
+          assistantEntries.push({ recipe: recipePayload });
+        }
       }
 
       // Step 3: fall back to the raw result message when nothing else is available
-      if (assistantMessages.length === 0) {
+      if (assistantEntries.length === 0) {
         const fallbackText = String(response?.result?.message ?? "").trim();
         if (fallbackText) {
-          assistantMessages.push(fallbackText);
+          assistantEntries.push({ text: fallbackText });
         }
       }
 
       // Step 4: append everything to the chat log
-      if (assistantMessages.length > 0) {
-        const newMessages = assistantMessages.map(text => ({ id: createMessageId(), role: "assistant" as const, text }));
-        setMessages(prev => [...prev, ...newMessages]);
-      }
+      appendAssistantMessages(assistantEntries);
 
       if (response.finished) {
         // Await reinitialization to prevent race conditions with loading state
@@ -235,7 +287,7 @@ function ChatPageContent() {
             AI Recipes for User: {userId ?? "-"}
           </h1>
           <p className="mt-3 max-w-2xl text-base text-slate-600">
-            Tell me the dish or ingredients you have and I will generate a low-GI, balanced recipe for a single serving.
+            Tell me the ingredients you have.
           </p>
           {sessionError ? (
             <p className="mt-2 text-sm text-red-500" aria-live="assertive">
@@ -261,7 +313,7 @@ function ChatPageContent() {
               <div className="flex flex-col gap-4">
                 {messages.map((message) =>
                   message.role === "user" ? (
-                    <UserBubble key={message.id} text={message.text} />
+                    <UserBubble key={message.id} message={message} />
                   ) : (
                     <AssistantBubble key={message.id} message={message} />
                   )
@@ -316,26 +368,104 @@ export default function ChatPage() {
   );
 }
 
-function UserBubble({ text }: { text: string }) {
+function UserBubble({ message }: { message: Extract<Message, { role: "user" }> }) {
   return (
     <div className="flex justify-end">
       <div className="w-full max-w-[820px] rounded-3xl bg-[#f2f5fb] px-6 py-4 text-sm text-slate-700 sm:mr-4">
-        {text}
+        {message.text}
       </div>
     </div>
   );
 }
 
 function AssistantBubble({ message }: { message: Extract<Message, { role: "assistant" }> }) {
+  const recipe = message.recipe ?? parseRecipeText(message.text ?? "");
+  const hasRecipe = Boolean(recipe);
+  const sanitizedText = (message.text ?? "").trim();
+  const isLikelyJson = sanitizedText.startsWith("{") || sanitizedText.startsWith("[");
+  const displayText = sanitizedText.length > 0 && (!hasRecipe || !isLikelyJson);
+
   return (
     <div className="flex justify-start">
       <div className="w-full max-w-[820px] rounded-3xl border border-white/60 bg-white px-6 py-6 shadow-[8px_8px_18px_rgba(209,217,230,0.35),_-8px_-8px_18px_rgba(255,255,255,0.9)] sm:ml-4">
         <span className="text-xs uppercase tracking-normal text-emerald-500">
           Suggestion
         </span>
-        <pre className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600 font-sans">
-          {message.text}
-        </pre>
+        {displayText ? (
+          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-slate-600">
+            {sanitizedText}
+          </p>
+        ) : null}
+        {hasRecipe && recipe ? (
+          <RecipeResponseCards recipe={recipe} />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function RecipeResponseCards({ recipe }: { recipe: RecipePayload }) {
+  const { title, ingredients, steps } = recipe;
+  const showTitle = Boolean(title && title.trim().length > 0);
+  const hasIngredients = ingredients.length > 0;
+  const hasSteps = steps.length > 0;
+
+  return (
+    <div className="mt-5 space-y-4">
+      {showTitle ? (
+        <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
+      ) : null}
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="h-full rounded-2xl border border-slate-100 bg-[#f7f9fd] px-5 py-5 shadow-[6px_6px_12px_rgba(209,217,230,0.35),_-6px_-6px_12px_rgba(255,255,255,0.9)]">
+          <CardHeader className="p-0">
+            <CardTitle className="text-sm font-semibold uppercase tracking-normal text-slate-600">
+              Ingredients
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="mt-4 space-y-3 p-0">
+            {hasIngredients ? (
+              <ul className="space-y-2 text-sm text-slate-600">
+                {ingredients.map((ingredient, index) => (
+                  <li key={`${ingredient.name}-${index}`} className="flex items-start gap-2">
+                    <span className="mt-2 h-2 w-2 rounded-full bg-emerald-400" />
+                    <span className="flex-1 leading-6">
+                      <span className="font-medium text-slate-700">{ingredient.name}</span>
+                      {ingredient.amount ? <span> — {ingredient.amount}</span> : null}
+                      {ingredient.notes ? (
+                        <span className="text-slate-500"> ({ingredient.notes})</span>
+                      ) : null}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-sm text-slate-500">No ingredients provided.</p>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="h-full rounded-2xl border border-slate-100 bg-[#f7f9fd] px-5 py-5 shadow-[6px_6px_12px_rgba(209,217,230,0.35),_-6px_-6px_12px_rgba(255,255,255,0.9)]">
+          <CardHeader className="p-0">
+            <CardTitle className="text-sm font-semibold uppercase tracking-normal text-slate-600">
+              Steps
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="mt-4 space-y-3 p-0">
+            {hasSteps ? (
+              <ol className="space-y-3 text-sm text-slate-600">
+                {steps.map((step, index) => (
+                  <li key={`step-${index}`} className="flex gap-3 leading-6">
+                    <span className="mt-1 inline-flex h-6 w-6 flex-none items-center justify-center rounded-full bg-emerald-500/10 text-xs font-semibold text-emerald-600">
+                      {index + 1}
+                    </span>
+                    <span className="flex-1">{step}</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="text-sm text-slate-500">No steps provided.</p>
+            )}
+          </CardContent>
+        </Card>
       </div>
     </div>
   );
@@ -690,37 +820,6 @@ function parseRecipeText(rawText: unknown): RecipePayload | null {
   } catch {
     return null;
   }
-}
-
-function formatRecipe(recipe: RecipePayload): string {
-  const { title, ingredients, steps } = recipe;
-  if (!title && ingredients.length === 0 && steps.length === 0) {
-    return "No recipe details were provided.";
-  }
-
-  const lines: string[] = [];
-
-  if (title) {
-    lines.push(`**${title}**`);
-    lines.push("");
-  }
-
-  if (ingredients.length > 0) {
-    lines.push("**Ingredients:**");
-    ingredients.forEach((ing) => {
-      lines.push(`- ${ing.name} (${ing.amount})`);
-    });
-    lines.push("");
-  }
-
-  if (steps.length > 0) {
-    lines.push("**Steps:**");
-    steps.forEach((step, index) => {
-      lines.push(`${index + 1}. ${step}`);
-    });
-  }
-
-  return lines.join("\n");
 }
 
 function createMessageId() {
