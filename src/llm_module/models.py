@@ -12,7 +12,7 @@ class HealthInfo(BaseModel):
     """Structured representation of the user's health information."""
 
     age: Optional[int] = Field(None, ge=0, description="Age in years")
-    gender: Optional[str] = Field(None, description="Gender identity")
+    gender: Optional[str] = Field("female", description="Gender identity")
     weight_kg: Optional[float] = Field(
         None, gt=0, description="Body weight in kilograms"
     )
