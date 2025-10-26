@@ -528,6 +528,84 @@ def api_send():
             payload = asyncio.run(st.query.RequestResult())
         except Exception as exc:
             payload = {"message": f"Pipeline finished but result retrieval failed: {exc}"}
+        # Try to run a prediction using profile + any macros returned
+        try:
+            repo, _ = ensure_user_health_profile(user_id=st.user_id, storage_dir=USER_DATA_DIR)
+            profile = repo.load() or HealthInfo()
+            # Require height and weight before prediction
+            if not profile.height_cm or not profile.weight_kg or profile.height_cm <= 0 or profile.weight_kg <= 0:
+                messages.append({
+                    "type": "chat",
+                    "role": "AI",
+                    "text": "Please complete your Profile (height and weight) to enable glucose forecasting for this recipe."
+                })
+                raise RuntimeError("Missing body metrics for prediction")
+            result_recipe = (payload or {}).get("result", {}).get("recipe", {})
+            macros = {
+                "meal_calories": _safe_float(str(result_recipe.get("meal_calories"))) or _safe_float(str((payload or {}).get("result", {}).get("meal_calories"))),
+                "carbs_g": _safe_float(str(result_recipe.get("carbs_g"))) or _safe_float(str((payload or {}).get("result", {}).get("carbs_g"))),
+                "protein_g": _safe_float(str(result_recipe.get("protein_g"))) or _safe_float(str((payload or {}).get("result", {}).get("protein_g"))),
+                "fat_g": _safe_float(str(result_recipe.get("fat_g"))) or _safe_float(str((payload or {}).get("result", {}).get("fat_g"))),
+                "fiber_g": _safe_float(str(result_recipe.get("fiber_g"))) or _safe_float(str((payload or {}).get("result", {}).get("fiber_g"))),
+                "amount_consumed": _safe_float(str(result_recipe.get("amount_consumed"))) or _safe_float(str((payload or {}).get("result", {}).get("amount_consumed"))) or 1.0,
+            }
+            pred_payload = {
+                "meal_bucket": "Dinner",
+                "baseline_avg_glucose": 100.0,
+                "meal_calories": macros["meal_calories"] if macros["meal_calories"] is not None else 480.0,
+                "carbs_g": macros["carbs_g"] if macros["carbs_g"] is not None else 60.0,
+                "protein_g": macros["protein_g"] if macros["protein_g"] is not None else 24.0,
+                "fat_g": macros["fat_g"] if macros["fat_g"] is not None else 18.0,
+                "fiber_g": macros["fiber_g"] if macros["fiber_g"] is not None else 8.0,
+                "amount_consumed": macros["amount_consumed"],
+                "Age": profile.age,
+                "Gender": profile.gender or "Unknown",
+                "Body weight": profile.weight_kg,
+                "Height": profile.height_cm,
+                "activity_cal_mean": 120.0,
+                "mets_mean": 1.2,
+                "return_plot": True,
+                "return_csv": False,
+            }
+            raw_pred = asyncio.run(st.model.predict(pred_payload))
+            raw_json = raw_pred[0] if isinstance(raw_pred, tuple) else raw_pred
+            pred = json.loads(raw_json)
+            minutes = pred.get("minutes", [])
+            glucose = pred.get("absolute_glucose", [])
+            peak_val = None
+            ttp = None
+            if minutes and glucose and len(minutes) == len(glucose):
+                max_idx = max(range(len(glucose)), key=lambda i: glucose[i])
+                peak_val = float(glucose[max_idx])
+                ttp = int(minutes[max_idx])
+            dangerous = bool(peak_val is not None and peak_val >= 180.0)
+            forecast = {
+                "minutes": minutes,
+                "absolute_glucose": glucose,
+                "png_base64": pred.get("png_base64"),
+                "metrics": {
+                    "peak_value": peak_val or 0.0,
+                    "time_to_peak": ttp or 0,
+                    "dangerous_spike": dangerous,
+                },
+            }
+            if isinstance(payload, dict):
+                payload.setdefault("forecast", forecast)
+            # Persist last forecast for dashboard reuse
+            try:
+                profile_path = USER_DATA_DIR / f"{st.user_id}.json"
+                try:
+                    with profile_path.open("r", encoding="utf-8") as fh:
+                        prof = json.load(fh)
+                except Exception:
+                    prof = {}
+                prof["last_forecast"] = forecast
+                with profile_path.open("w", encoding="utf-8") as fh:
+                    json.dump(prof, fh, indent=2)
+            except Exception:
+                pass
+        except Exception:
+            pass
         st.query = None
         st.finished = True
         return jsonify({"messages": messages, "finished": True, "result": payload})

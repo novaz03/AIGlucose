@@ -29,6 +29,16 @@ type AssistantMessage = {
   role: "assistant";
   text?: string;
   recipe?: RecipePayload;
+  forecast?: {
+    minutes: number[];
+    absolute_glucose: number[];
+    png_base64?: string;
+    metrics?: {
+      peak_value: number;
+      time_to_peak: number;
+      dangerous_spike: boolean;
+    };
+  };
 };
 
 type UserMessage = {
@@ -42,11 +52,12 @@ type Message = AssistantMessage | UserMessage;
 type AssistantMessageInput = {
   text?: string;
   recipe?: RecipePayload;
+  forecast?: AssistantMessage["forecast"];
 };
 
-function isPopulatedAssistantEntry(entry: AssistantMessageInput): entry is AssistantMessageInput & { text?: string; recipe: RecipePayload } | AssistantMessageInput & { text: string } {
+function isPopulatedAssistantEntry(entry: AssistantMessageInput): entry is AssistantMessageInput & { text?: string; recipe: RecipePayload } | AssistantMessageInput & { text: string } | AssistantMessageInput & { forecast: AssistantMessage["forecast"] } {
   const normalizedText = typeof entry.text === "string" ? entry.text.trim() : "";
-  return normalizedText.length > 0 || Boolean(entry.recipe);
+  return normalizedText.length > 0 || Boolean(entry.recipe) || Boolean(entry.forecast);
 }
 
 function normalizeAssistantEntry(entry: AssistantMessageInput): AssistantMessage {
@@ -56,6 +67,7 @@ function normalizeAssistantEntry(entry: AssistantMessageInput): AssistantMessage
     role: "assistant",
     ...(normalizedText.length > 0 ? { text: normalizedText } : {}),
     ...(entry.recipe ? { recipe: entry.recipe } : {}),
+    ...(entry.forecast ? { forecast: entry.forecast } : {}),
   };
 }
 
@@ -208,7 +220,7 @@ function ChatPageContent() {
               }
             });
           setMessages(assistantMessages);
-          persistChat(assistantMessages, null, uid);
+          persistChat(assistantMessages, null, String(currentUserId));
         }
         setIsSessionActive(true);
       } catch (error) {
@@ -272,6 +284,7 @@ function ChatPageContent() {
 
       // Step 2: pull the structured recipe for card rendering
       const recipePayload = extractRecipeFromResponse(response);
+      const forecastFromServer = response?.result?.forecast;
       if (recipePayload) {
         setRecipe(recipePayload); // update the recipe panel on the right
         const alreadyHasRecipeCard = assistantEntries.some((entry) => Boolean(entry.recipe));
@@ -280,7 +293,15 @@ function ChatPageContent() {
         }
       }
 
-      // Step 3: fall back to the raw result message when nothing else is available
+      // Step 3a: include forecast card if present
+      if (forecastFromServer && typeof forecastFromServer === 'object') {
+        assistantEntries.push({ forecast: forecastFromServer as any });
+        try {
+          sessionStorage.setItem('last_forecast', JSON.stringify(forecastFromServer));
+        } catch {}
+      }
+
+      // Step 3b: fall back to the raw result message when nothing else is available
       if (assistantEntries.length === 0) {
         const fallbackText = String(response?.result?.message ?? "").trim();
         if (fallbackText) {
@@ -421,6 +442,7 @@ function UserBubble({ message }: { message: Extract<Message, { role: "user" }> }
 function AssistantBubble({ message }: { message: Extract<Message, { role: "assistant" }> }) {
   const recipe = message.recipe ?? parseRecipeText(message.text ?? "");
   const hasRecipe = Boolean(recipe);
+  const hasForecast = Boolean(message.forecast);
   const sanitizedText = (message.text ?? "").trim();
   const isLikelyJson = sanitizedText.startsWith("{") || sanitizedText.startsWith("[");
   const displayText = sanitizedText.length > 0 && (!hasRecipe || !isLikelyJson);
@@ -438,6 +460,11 @@ function AssistantBubble({ message }: { message: Extract<Message, { role: "assis
         ) : null}
         {hasRecipe && recipe ? (
           <RecipeResponseCards recipe={recipe} />
+        ) : null}
+        {hasForecast && message.forecast ? (
+          <div className="mt-5">
+            <ForecastCard forecast={message.forecast} />
+          </div>
         ) : null}
       </div>
     </div>
@@ -508,6 +535,48 @@ function RecipeResponseCards({ recipe }: { recipe: RecipePayload }) {
         </Card>
       </div>
     </div>
+  );
+}
+
+function ForecastCard({ forecast }: { forecast: NonNullable<AssistantMessage["forecast"]> }) {
+  const { png_base64, metrics } = forecast;
+  return (
+    <Card className="rounded-2xl border border-slate-100 bg-[#f7f9fd] px-5 py-5">
+      <CardHeader className="p-0">
+        <CardTitle className="text-sm font-semibold uppercase tracking-normal text-slate-600">
+          Forecast
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="mt-4 grid gap-4 p-0">
+        {png_base64 ? (
+          <img
+            src={`data:image/png;base64,${png_base64}`}
+            alt="Glucose forecast"
+            className="w-full rounded-xl border border-white/50"
+          />
+        ) : (
+          <p className="text-sm text-slate-500">No plot available.</p>
+        )}
+        {metrics ? (
+          <div className="grid grid-cols-3 gap-3 text-sm text-slate-700">
+            <div className="rounded-xl bg-white px-4 py-3 shadow-sm">
+              <div className="text-xs uppercase text-slate-500">Peak</div>
+              <div className="font-semibold">{Math.round(metrics.peak_value)} mg/dL</div>
+            </div>
+            <div className="rounded-xl bg-white px-4 py-3 shadow-sm">
+              <div className="text-xs uppercase text-slate-500">Time to peak</div>
+              <div className="font-semibold">{metrics.time_to_peak} min</div>
+            </div>
+            <div className="rounded-xl bg-white px-4 py-3 shadow-sm">
+              <div className="text-xs uppercase text-slate-500">Risk</div>
+              <div className={`font-semibold ${metrics.dangerous_spike ? "text-red-600" : "text-emerald-600"}`}>
+                {metrics.dangerous_spike ? "Spike risk" : "Within range"}
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }
 

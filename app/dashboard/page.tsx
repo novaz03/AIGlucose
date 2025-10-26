@@ -98,7 +98,25 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (height == null || weight == null) {
-      setChartPoints([]);
+      // Try to load a cached forecast from chat if available
+      try {
+        const raw = sessionStorage.getItem('last_forecast');
+        if (raw) {
+          const data = JSON.parse(raw);
+          const mins = Array.isArray(data?.minutes) ? data.minutes : [];
+          const abs = Array.isArray(data?.absolute_glucose) ? data.absolute_glucose : [];
+          const points = mins.reduce<ChartPoint[]>((acc, minute, i) => {
+            const glucose = typeof abs[i] === 'number' ? abs[i] : null;
+            if (glucose != null) acc.push({ minute, glucose });
+            return acc;
+          }, []);
+          setChartPoints(points);
+        } else {
+          setChartPoints([]);
+        }
+      } catch {
+        setChartPoints([]);
+      }
       setBaselineGlucose(null);
       setLoadingForecast(false);
       return;
