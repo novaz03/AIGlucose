@@ -100,7 +100,7 @@ export default function DashboardPage() {
     if (height == null || weight == null) {
       // Try to load a cached forecast from chat if available
       try {
-        const raw = sessionStorage.getItem('last_forecast');
+        const raw = localStorage.getItem('last_forecast');
         if (raw) {
           const data = JSON.parse(raw);
           const mins: number[] = Array.isArray(data?.minutes)

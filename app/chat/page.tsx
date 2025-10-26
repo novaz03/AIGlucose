@@ -105,13 +105,13 @@ function ChatPageContent() {
   const persistChat = (msgs: Message[], recipePayload: RecipePayload | null, uid: string | null) => {
     try {
       const payload = { messages: msgs, recipe: recipePayload, userId: uid };
-      sessionStorage.setItem(CHAT_CACHE_KEY, JSON.stringify(payload));
+      localStorage.setItem(CHAT_CACHE_KEY, JSON.stringify(payload));
     } catch {}
   };
 
   const loadCachedChat = () => {
     try {
-      const raw = sessionStorage.getItem(CHAT_CACHE_KEY);
+      const raw = localStorage.getItem(CHAT_CACHE_KEY);
       if (!raw) return null;
       const data = JSON.parse(raw);
       if (!Array.isArray(data.messages)) return null;
@@ -135,9 +135,13 @@ function ChatPageContent() {
         : [];
       setSessionError(null);
       const entries = greetingMessages.map((text: string) => ({ text }));
-      appendAssistantMessages(entries);
+      const normalized = entries.filter(isPopulatedAssistantEntry).map(normalizeAssistantEntry);
+      setMessages((prev) => {
+        const next = [...prev, ...normalized];
+        persistChat(next, null, userId);
+        return next;
+      });
       setIsSessionActive(true);
-      persistChat(messages.concat(entries.map(normalizeAssistantEntry)), null, userId);
     } catch (error) {
       console.error("Failed to reinitialise session:", error);
       setSessionError("Unable to restart the session. Please try again later.");
@@ -221,7 +225,6 @@ function ChatPageContent() {
               }
             });
           setMessages(assistantMessages);
-          persistChat(assistantMessages, null, uid);
         }
         setIsSessionActive(true);
       } catch (error) {
@@ -299,7 +302,7 @@ function ChatPageContent() {
       if (forecastFromServer && typeof forecastFromServer === 'object') {
         assistantEntries.push({ forecast: forecastFromServer as any });
         try {
-          sessionStorage.setItem('last_forecast', JSON.stringify(forecastFromServer));
+          localStorage.setItem('last_forecast', JSON.stringify(forecastFromServer));
         } catch {}
       }
 
@@ -311,13 +314,15 @@ function ChatPageContent() {
         }
       }
 
-      // Step 4: append everything to the chat log
-      appendAssistantMessages(assistantEntries);
-      persistChat(
-        (messages || []).concat(assistantEntries.map(normalizeAssistantEntry)),
-        recipePayload ?? null,
-        userId,
-      );
+      // Step 4: append everything to the chat log and persist the exact array
+      const normalized = assistantEntries
+        .filter(isPopulatedAssistantEntry)
+        .map(normalizeAssistantEntry);
+      setMessages((prev) => {
+        const next = [...prev, ...normalized];
+        persistChat(next, recipePayload ?? null, userId);
+        return next;
+      });
 
       if (response.finished) {
         // Await reinitialization to prevent race conditions with loading state

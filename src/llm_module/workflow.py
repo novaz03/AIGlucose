@@ -260,11 +260,12 @@ def run_food_analysis_pipeline(
     health_info = session_manager.ensure_health_info()
 
     if not _has_required_health_fields(health_info):
+        # Allow recipe generation to proceed with partial profiles, but notify the user.
         missing = ", ".join(_missing_health_fields(health_info))
         prompts.notify(
-            "Please complete your profile (" + missing + ") before requesting a recipe."
+            "I can generate a recipe now. For more personalised guidance later, please complete your profile ("
+            + missing + ")."
         )
-        raise ValueError("Required health parameters not provided.")
 
     user_context = collect_user_context(session_manager=session_manager, prompts=prompts)
 
