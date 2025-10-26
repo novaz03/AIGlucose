@@ -88,6 +88,28 @@ function ChatPageContent() {
     ]);
   };
 
+  const CHAT_CACHE_KEY = 'chat_state_v1';
+
+  const persistChat = (msgs: Message[], recipePayload: RecipePayload | null, uid: string | null) => {
+    try {
+      const payload = { messages: msgs, recipe: recipePayload, userId: uid };
+      sessionStorage.setItem(CHAT_CACHE_KEY, JSON.stringify(payload));
+    } catch {}
+  };
+
+  const loadCachedChat = () => {
+    try {
+      const raw = sessionStorage.getItem(CHAT_CACHE_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (!Array.isArray(data.messages)) return null;
+      const msgs = data.messages as Message[];
+      const recipePayload = (data.recipe ?? null) as RecipePayload | null;
+      const uid = typeof data.userId === 'string' ? data.userId : null;
+      return { msgs, recipePayload, uid };
+    } catch { return null; }
+  };
+
   const reinitializeSession = async () => {
     setIsLoading(true);
     setIsSessionActive(false);
@@ -100,8 +122,10 @@ function ChatPageContent() {
           .filter((txt: string) => txt.trim().length > 0)
         : [];
       setSessionError(null);
-      appendAssistantMessages(greetingMessages.map((text: string) => ({ text })));
+      const entries = greetingMessages.map((text: string) => ({ text }));
+      appendAssistantMessages(entries);
       setIsSessionActive(true);
+      persistChat(messages.concat(entries.map(normalizeAssistantEntry)), null, userId);
     } catch (error) {
       console.error("Failed to reinitialise session:", error);
       setSessionError("Unable to restart the session. Please try again later.");
@@ -123,8 +147,19 @@ function ChatPageContent() {
         if (cancelled) {
           return;
         }
-        setUserId(String(currentUserId));
+        const uid = String(currentUserId);
+        setUserId(uid);
         setSessionError(null);
+
+        // Try cached chat first for seamless tab switches
+        const cached = loadCachedChat();
+        if (cached && cached.uid === uid && cached.msgs.length > 0) {
+          setMessages(cached.msgs);
+          setRecipe(cached.recipePayload);
+          setIsSessionActive(true);
+          setIsLoading(false);
+          return;
+        }
         setMessages([]);
       } catch (error) {
         console.error("Session lookup failed:", error);
@@ -173,6 +208,7 @@ function ChatPageContent() {
               }
             });
           setMessages(assistantMessages);
+          persistChat(assistantMessages, null, uid);
         }
         setIsSessionActive(true);
       } catch (error) {
@@ -206,10 +242,11 @@ function ChatPageContent() {
     }
 
     const userMessageId = createMessageId();
-    setMessages((prev) => [
-      ...prev,
-      { id: userMessageId, role: "user", text: trimmed },
-    ]);
+    setMessages((prev) => {
+      const next = [...prev, { id: userMessageId, role: "user", text: trimmed }];
+      persistChat(next, null, userId);
+      return next;
+    });
     setInputValue("");
     setRecipe(null); // Clear the previous recipe from the UI
     setIsLoading(true);
@@ -253,6 +290,11 @@ function ChatPageContent() {
 
       // Step 4: append everything to the chat log
       appendAssistantMessages(assistantEntries);
+      persistChat(
+        (messages || []).concat(assistantEntries.map(normalizeAssistantEntry)),
+        recipePayload ?? null,
+        userId,
+      );
 
       if (response.finished) {
         // Await reinitialization to prevent race conditions with loading state

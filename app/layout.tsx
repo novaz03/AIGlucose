@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import "./globals.css";
 import { Navbar } from "@/components/navbar";
 import { UserProvider } from "@/context/UserContext";
+import SessionBootstrap from "@/components/SessionBootstrap";
 import { Noto_Serif_SC } from "next/font/google";
 import { cn } from "@/lib/utils";
 
@@ -51,6 +52,7 @@ export default function RootLayout({
           <div className="h-64 w-64 rounded-full bg-gradient-to-br from-sky-200 via-emerald-100 to-white opacity-60" />
         </div>
         <UserProvider>
+          <SessionBootstrap />
           <Navbar />
           <main className="mx-auto my-6 w-full max-w-6xl bg-transparent px-2 pb-10 sm:my-8 sm:px-4 lg:pb-14">
             <div className="neu-surface rounded-[24px] px-4 py-6 sm:rounded-[32px] sm:px-8 sm:py-10">
