@@ -53,6 +53,28 @@ def _build_plot(minutes: np.ndarray, abs_curve: np.ndarray, delta_curve: np.ndar
     return base64.b64encode(buf.read()).decode("utf-8")
 
 
+def _build_csv(df_row: pd.Series,
+               minutes: np.ndarray,
+               delta_curve: np.ndarray,
+               abs_curve: np.ndarray) -> str:
+    """
+    Build a CSV string with per-minute rows and all input fields replicated on each row.
+    Columns: minute, delta_glucose, absolute_glucose, <all original input fields...>
+    """
+    base = pd.DataFrame({
+        "minute": minutes.astype(int),
+        "delta_glucose": delta_curve.astype(float),
+        "absolute_glucose": abs_curve.astype(float),
+    })
+    # Append the inputs as columns, repeated across all rows
+    inputs_df = pd.DataFrame([df_row.to_dict()])
+    # Ensure all expected input columns are present in the same order
+    # Repeat across rows
+    repeated = pd.concat([inputs_df]*len(base), ignore_index=True)
+    out = pd.concat([base, repeated], axis=1)
+    return out.to_csv(index=False)
+
+
 # ----------------------------- model -----------------------------
 class PredictionModel:
     """
@@ -222,22 +244,14 @@ class PredictionModel:
     # ----- Core predict (single) -----
     async def predict(self, payload: Any) -> str:
         """
-        Accepts a dict-like payload:
-          {
-            "meal_bucket": "Lunch",
-            "baseline_avg_glucose": 110,
-            "carbs_g": 75, "protein_g": 25, "fat_g": 20, "fiber_g": 8,
-            "Age": 44, "Gender": "Male",
-            "Body weight": 82, "Height": 178,
-            "activity_cal_mean": 120, "mets_mean": 1.4,
-            "return_plot": true   # optional
-          }
-        Returns a JSON string with:
+        Accepts a dict-like payload and returns JSON string with:
           - minutes (1..120)
           - delta_glucose (Δ mg/dL)
           - absolute_glucose (mg/dL)
-          - inputs_used (the normalized row)
+          - inputs_used (normalized row)
           - png_base64 (optional, when return_plot==True)
+          - csv (optional, when return_csv==True): UTF-8 CSV text
+          - csv_base64 (optional, when return_csv==True): base64 of CSV
         """
         await asyncio.sleep(0)  # keep async-friendly
 
@@ -245,6 +259,7 @@ class PredictionModel:
             raise TypeError("payload must be a dict-like mapping")
 
         return_plot = bool(payload.get("return_plot", False))
+        return_csv  = bool(payload.get("return_csv", False))
         df = self._payload_to_df(payload)
 
         # Predict Δglucose 1..120
@@ -262,14 +277,22 @@ class PredictionModel:
         baseline = float(df.loc[0, "baseline_avg_glucose"])
         y_abs = (baseline + y_delta).astype(float)
 
+        inputs_used = json.loads(df.iloc[0].to_json())
         result: Dict[str, Any] = {
             "minutes": minutes.tolist(),
             "delta_glucose": y_delta.tolist(),
             "absolute_glucose": y_abs.tolist(),
-            "inputs_used": json.loads(df.iloc[0].to_json()),
+            "inputs_used": inputs_used,
         }
         if return_plot:
             result["png_base64"] = _build_plot(minutes, y_abs, y_delta)
+
+        if return_csv:
+            csv_text = _build_csv(df.iloc[0], minutes, y_delta, y_abs)
+            result["csv"] = csv_text
+            result["csv_base64"] = base64.b64encode(csv_text.encode("utf-8")).decode("utf-8")
+            # Optional filename hint
+            result["csv_filename"] = f"glucose_curve_{inputs_used.get('meal_bucket','meal')}.csv"
 
         return json.dumps(result)
 
@@ -278,6 +301,7 @@ class PredictionModel:
         """
         Batch version: accepts a list of payload dicts, returns:
         {"items": [ <single predict() dict>, ... ]}
+        Supports 'return_plot' and 'return_csv' per item.
         """
         await asyncio.sleep(0)
         if not isinstance(payloads, list):
@@ -286,13 +310,15 @@ class PredictionModel:
         if not payloads:
             return json.dumps({"items": []})
 
-        dfs, baselines, plots = [], [], []
+        dfs, baselines, plots, csv_flags = [], [], [], []
         for p in payloads:
             return_plot = bool(p.get("return_plot", False))
+            return_csv  = bool(p.get("return_csv", False))
             df = self._payload_to_df(p)
             dfs.append(df)
             baselines.append(float(df.loc[0, "baseline_avg_glucose"]))
             plots.append(return_plot)
+            csv_flags.append(return_csv)
 
         X = pd.concat(dfs, axis=0, ignore_index=True)  # vectorized
         try:
@@ -309,14 +335,20 @@ class PredictionModel:
         for i, base in enumerate(baselines):
             y_delta = Y[i]
             y_abs = base + y_delta
+            inputs_used = json.loads(dfs[i].iloc[0].to_json())
             item = {
                 "minutes": minutes.tolist(),
                 "delta_glucose": y_delta.tolist(),
                 "absolute_glucose": y_abs.tolist(),
-                "inputs_used": json.loads(dfs[i].iloc[0].to_json()),
+                "inputs_used": inputs_used,
             }
             if plots[i]:
                 item["png_base64"] = _build_plot(minutes, y_abs, y_delta)
+            if csv_flags[i]:
+                csv_text = _build_csv(dfs[i].iloc[0], minutes, y_delta, y_abs)
+                item["csv"] = csv_text
+                item["csv_base64"] = base64.b64encode(csv_text.encode("utf-8")).decode("utf-8")
+                item["csv_filename"] = f"glucose_curve_{inputs_used.get('meal_bucket','meal')}_{i}.csv"
             items.append(item)
 
         return json.dumps({"items": items})
