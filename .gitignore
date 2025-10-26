@@ -1,7 +1,7 @@
 __pycache__/
 
 .vs/
-*.json
+user_data/
 .vscode/
 *.pkl
 .env

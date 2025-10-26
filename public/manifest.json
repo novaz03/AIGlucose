@@ -1,0 +1,16 @@
+{
+  "name": "AIGlucose Wellness Assistant",
+  "short_name": "AIGlucose",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#e6ecf5",
+  "theme_color": "#16a34a",
+  "description": "Manage personal metrics, AI recipes, and glucose forecasts with a calm, wellness-focused experience.",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}

@@ -218,10 +218,12 @@ def _get_state(create_if_missing: bool = True) -> Optional[SessionState]:
 app = Flask(__name__)
 app.secret_key = "dev-glucose-chef-secret"
 
-frontend_origins = {
+frontend_origins = [
+    "https://ai-glucose-c1ly.vercel.app",  
     "http://localhost:3000",
-    "http://127.0.0.1:3000",
-}
+    "http://127.0.0.1:3000"
+]
+
 CORS(
     app,
     resources={r"/api/*": {"origins": list(frontend_origins)}},
