@@ -97,30 +97,31 @@ export default function DashboardPage() {
   }, [age, height, weight, profileStatus, updateMetrics]);
 
   useEffect(() => {
-    if (height == null || weight == null) {
-      // Try to load a cached forecast from chat if available
-      try {
-        const raw = localStorage.getItem('last_forecast');
-        if (raw) {
-          const data = JSON.parse(raw);
-          const mins: number[] = Array.isArray(data?.minutes)
-            ? (data.minutes as any[]).filter((v: any) => typeof v === 'number') as number[]
-            : [];
-          const abs: number[] = Array.isArray(data?.absolute_glucose)
-            ? (data.absolute_glucose as any[]).filter((v: any) => typeof v === 'number') as number[]
-            : [];
-          const points: ChartPoint[] = mins.reduce((acc: ChartPoint[], minute: number, i: number) => {
-            const glucose = abs[i];
-            if (typeof glucose === 'number') acc.push({ minute, glucose });
-            return acc;
-          }, [] as ChartPoint[]);
+    // Always try to show the most recent chat-driven forecast first
+    try {
+      const raw = localStorage.getItem('last_forecast');
+      if (raw) {
+        const data = JSON.parse(raw);
+        const mins: number[] = Array.isArray(data?.minutes)
+          ? (data.minutes as any[]).filter((v: any) => typeof v === 'number') as number[]
+          : [];
+        const abs: number[] = Array.isArray(data?.absolute_glucose)
+          ? (data.absolute_glucose as any[]).filter((v: any) => typeof v === 'number') as number[]
+          : [];
+        const points: ChartPoint[] = mins.reduce((acc: ChartPoint[], minute: number, i: number) => {
+          const glucose = abs[i];
+          if (typeof glucose === 'number') acc.push({ minute, glucose });
+          return acc;
+        }, [] as ChartPoint[]);
+        if (points.length > 0) {
           setChartPoints(points);
-        } else {
-          setChartPoints([]);
         }
-      } catch {
-        setChartPoints([]);
       }
+    } catch {
+      // ignore
+    }
+
+    if (height == null || weight == null) {
       setBaselineGlucose(null);
       setLoadingForecast(false);
       return;
@@ -189,6 +190,35 @@ export default function DashboardPage() {
       cancelled = true;
     };
   }, [age, height, weight, gender]);
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== 'last_forecast') return;
+      try {
+        const raw = e.newValue;
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        const mins: number[] = Array.isArray(data?.minutes)
+          ? (data.minutes as any[]).filter((v: any) => typeof v === 'number') as number[]
+          : [];
+        const abs: number[] = Array.isArray(data?.absolute_glucose)
+          ? (data.absolute_glucose as any[]).filter((v: any) => typeof v === 'number') as number[]
+          : [];
+        const points: ChartPoint[] = mins.reduce((acc: ChartPoint[], minute: number, i: number) => {
+          const glucose = abs[i];
+          if (typeof glucose === 'number') acc.push({ minute, glucose });
+          return acc;
+        }, [] as ChartPoint[]);
+        if (points.length > 0) {
+          setChartPoints(points);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
 
   const yDomain = useMemo<[number, number]>(() => {
     if (!chartPoints.length) {
