@@ -30,7 +30,11 @@ from src.llm_module.responses import (
     build_profile_update_prompts,
 )
 from src.llm_module.utils import strip_json_code_fence
-from src.llm_module.workflow import DEFAULT_LMSTUDIO_MODEL
+from src.llm_module.workflow import (
+    DEFAULT_GEMINI_MODEL,
+    DEFAULT_LMSTUDIO_MODEL,
+    create_gemini_components,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -52,30 +56,37 @@ def _parse_json_dict(raw: Optional[str]) -> dict[str, Any]:
 
 
 def _build_llm_configuration() -> tuple[Any, LLMRequestContext]:
-    provider = os.getenv("LLM_PROVIDER", "lmstudio").strip().lower() or "lmstudio"
-    model_name = os.getenv("LLM_MODEL") or DEFAULT_LMSTUDIO_MODEL
-
+    provider = os.getenv("LLM_PROVIDER", "gemini").strip().lower() or "gemini"
     request_extra_options = _parse_json_dict(os.getenv("LLM_EXTRA_OPTIONS"))
     client_kwargs: dict[str, Any] = {}
 
     if provider == "gemini":
-        api_key = os.getenv("GEMINI_API_KEY")
-        if not api_key:
-            raise RuntimeError("GEMINI_API_KEY must be set when LLM_PROVIDER=gemini")
-        client_kwargs["api_key"] = api_key
+        model_name = os.getenv("LLM_MODEL") or DEFAULT_GEMINI_MODEL
 
-        default_generation = _parse_json_dict(os.getenv("GEMINI_GENERATION_CONFIG"))
-        if default_generation:
-            client_kwargs["default_generation_config"] = default_generation
-
+        generation_overrides = _parse_json_dict(os.getenv("GEMINI_GENERATION_CONFIG"))
         safety_settings_raw = os.getenv("GEMINI_SAFETY_SETTINGS")
+        safety_settings = None
         if safety_settings_raw:
             try:
-                client_kwargs["default_safety_settings"] = json.loads(safety_settings_raw)
+                safety_settings = json.loads(safety_settings_raw)
             except json.JSONDecodeError:
                 logger.warning("Invalid JSON for GEMINI_SAFETY_SETTINGS; ignoring value.")
 
-    elif provider == "openai":
+        client, request_context = create_gemini_components(
+            api_key=os.getenv("GEMINI_API_KEY"),
+            model_name=model_name,
+            generation_config_overrides=generation_overrides or None,
+            safety_settings=safety_settings,
+        )
+
+        if request_extra_options:
+            request_context.extra_options.update(request_extra_options)
+
+        return client, request_context
+
+    model_name = os.getenv("LLM_MODEL") or DEFAULT_LMSTUDIO_MODEL
+
+    if provider == "openai":
         api_key = os.getenv("OPENAI_API_KEY")
         if api_key:
             client_kwargs["api_key"] = api_key

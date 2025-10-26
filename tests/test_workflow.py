@@ -54,8 +54,8 @@ def reset_llm_env(monkeypatch):
     monkeypatch.delenv("HUGGINGFACE_API_TOKEN", raising=False)
     monkeypatch.delenv("LMSTUDIO_BASE_URL", raising=False)
 
-    # ensure default configuration is restored
-    ai_query_interface._build_llm_configuration.cache_clear() if hasattr(ai_query_interface._build_llm_configuration, "cache_clear") else None
+    # Default the provider to lmstudio for unit tests to avoid requiring secrets
+    monkeypatch.setenv("LLM_PROVIDER", "lmstudio")
 
 
 def test_ai_query_prefills_saved_health_profile(tmp_path, monkeypatch):
