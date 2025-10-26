@@ -458,7 +458,11 @@ def api_predict():
 
     try:
         raw_result = asyncio.run(st.model.predict(payload))
-        result = json.loads(raw_result)
+        if isinstance(raw_result, tuple):
+            raw_json = raw_result[0]
+        else:
+            raw_json = raw_result
+        result = json.loads(raw_json)
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
     except Exception as exc:  # pragma: no cover - safeguard

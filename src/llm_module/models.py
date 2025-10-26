@@ -206,6 +206,14 @@ class FoodAnalysisResponse(BaseModel):
 
         return {"recipe": recipe_payload}
 
+    # Optional nutrition/macros for prediction model
+    meal_calories: Optional[float] = Field(default=None, description="Estimated total meal calories")
+    carbs_g: Optional[float] = Field(default=None, description="Estimated total carbohydrates in grams")
+    protein_g: Optional[float] = Field(default=None, description="Estimated total protein in grams")
+    fat_g: Optional[float] = Field(default=None, description="Estimated total fat in grams")
+    fiber_g: Optional[float] = Field(default=None, description="Estimated total fiber in grams")
+    amount_consumed: Optional[float] = Field(default=None, description="Proportion consumed (1.0 = 100%)")
+
     recipe: Recipe = Field(..., description="Generated recipe output")
 
     @property
@@ -222,6 +230,13 @@ class FoodAnalysisResult(BaseModel):
         ..., description="Collected health information used for analysis"
     )
     recipe: Recipe = Field(..., description="Generated recipe output")
+    # Carry optional nutrition/macros forward for the UI or prediction
+    meal_calories: Optional[float] = None
+    carbs_g: Optional[float] = None
+    protein_g: Optional[float] = None
+    fat_g: Optional[float] = None
+    fiber_g: Optional[float] = None
+    amount_consumed: Optional[float] = None
 
     @property
     def food(self) -> Recipe:

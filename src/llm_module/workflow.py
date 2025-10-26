@@ -277,6 +277,12 @@ def run_food_analysis_pipeline(
     result = FoodAnalysisResult(
         health_parameters=user_context.health_info,
         recipe=response.recipe,
+        meal_calories=response.meal_calories,
+        carbs_g=response.carbs_g,
+        protein_g=response.protein_g,
+        fat_g=response.fat_g,
+        fiber_g=response.fiber_g,
+        amount_consumed=response.amount_consumed,
     )
     result_payload = result.model_dump(exclude_none=True)
     _persist_pipeline_result(

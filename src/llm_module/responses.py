@@ -35,7 +35,14 @@ FOOD_ANALYSIS_SCHEMA = {
                 }
             },
             "required": ["title", "ingredients", "steps"]
-        }
+        },
+        # Optional nutrition fields to feed the prediction model
+        "meal_calories": {"type": "number"},
+        "carbs_g": {"type": "number"},
+        "protein_g": {"type": "number"},
+        "fat_g": {"type": "number"},
+        "fiber_g": {"type": "number"},
+        "amount_consumed": {"type": "number"}
     },
     "required": ["recipe"]
 }
@@ -112,6 +119,8 @@ def build_user_prompt(*, context_json: str) -> str:
         - When the user only states a dish, infer a practical low-GI interpretation that keeps post-meal glucose rise slow.
         - Use lean proteins, high-fibre vegetables, whole grains or legumes, healthy fats, and portion sizes suitable for one adult.
         - The `recipe.steps` array must contain at least three descriptive strings.
+        - When possible, also include top-level nutrition estimates for the meal as numeric fields: `meal_calories`, `carbs_g`, `protein_g`, `fat_g`, `fiber_g`, and `amount_consumed`.
+          `amount_consumed` should be a proportion (1.0 = 100%). If unknown, default to 1.0.
 
         Here is an example of a perfect response format:
         ```json
