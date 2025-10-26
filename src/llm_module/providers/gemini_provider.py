@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from typing import Any, Dict, Optional
+import json
 
 import google.generativeai as genai
 
@@ -67,10 +68,43 @@ class GeminiClient(LLMClientBase):
                 system_instruction=system_prompt,
             )
 
-            response = model.generate_content(
-                prompt,
-                **response_kwargs,
-            )
+            try:
+                response = model.generate_content(
+                    prompt,
+                    **response_kwargs,
+                )
+            except TypeError as te:
+                # Fallback for SDKs that don't support response_schema/response_mime_type
+                msg = str(te)
+                unsupported_keys = []
+                if "response_schema" in response_kwargs and "response_schema" in msg:
+                    unsupported_keys.append("response_schema")
+                if "response_mime_type" in response_kwargs and "response_mime_type" in msg:
+                    unsupported_keys.append("response_mime_type")
+                for key in unsupported_keys:
+                    response_kwargs.pop(key, None)
+
+                # If schema enforcement isn't supported, embed the schema into the prompt
+                if unsupported_keys and request_context.response_format:
+                    schema_text = json.dumps(request_context.response_format, indent=2)
+                    if system_prompt:
+                        system_prompt = (
+                            f"{system_prompt}\nYou must output ONLY JSON that conforms to this schema:\n{schema_text}"
+                        )
+                    else:
+                        prompt = (
+                            f"Return ONLY JSON that conforms to this JSON schema:\n{schema_text}\n\n" + prompt
+                        )
+                    # Recreate model to apply updated system_instruction
+                    model = genai.GenerativeModel(
+                        model_name=request_context.model_name,
+                        system_instruction=system_prompt,
+                    )
+
+                response = model.generate_content(
+                    prompt,
+                    **response_kwargs,
+                )
         except Exception as exc:  # pragma: no cover - network dependent
             raise LLMClientError(f"Gemini request failed: {exc}") from exc
 
