@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, Optional
 
-import google.generativeai as genai
+from google import genai
 
 from ..clients import LLMClientBase, LLMClientError
 from ..models import LLMRequestContext
