@@ -215,7 +215,7 @@ function ChatPageContent() {
     setIsLoading(true);
 
     try {
-      const response = await sendMessage(trimmed);
+      const response = await sendMessage(trimmed, userMessageId);
       const assistantEntries: AssistantMessageInput[] = [];
 
       // Step 1: collect assistant messages and attempt to parse any embedded recipes

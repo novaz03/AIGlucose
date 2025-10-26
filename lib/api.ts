@@ -28,14 +28,14 @@ export async function greet() {
   return response.json();
 }
 
-export async function sendMessage(message: string) {
+export async function sendMessage(message: string, clientMessageId?: string) {
   const response = await fetch(`/api/send`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     credentials: 'include',
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, client_msg_id: clientMessageId }),
   });
   if (!response.ok) {
     throw new Error('Sending message failed');

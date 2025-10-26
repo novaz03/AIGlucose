@@ -38,7 +38,7 @@ const UNDERLYING_DISEASE_OPTIONS: Array<{ label: string; value: string }> = [
   { label: "Type 1 Diabetes", value: "Type 1 Diabetes" },
   { label: "Type 2 Diabetes", value: "Type 2 Diabetes" },
   { label: "Prediabetes", value: "Prediabetes" },
-  { label: "Healthy Mode", value: "Healthy Mode" }
+  { label: "Healthy Mode", value: "Healthy" }
 ];
 
 const GENDER_OPTIONS: Array<{ label: string; value: string }> = [

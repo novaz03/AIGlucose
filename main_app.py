@@ -192,7 +192,10 @@ UNDERLYING_DISEASE_LEGACY_MAP = {
     "1型糖尿病": "Type 1 Diabetes",
     "2型糖尿病": "Type 2 Diabetes",
     "糖前": "Prediabetes",
-    "健康模式": "Healthy Mode",
+    # Normalise historical/translated labels to our canonical choice values
+    "健康模式": "Healthy",
+    "Healthy Mode": "Healthy",
+    "healthy mode": "Healthy",
 }
 
 USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -209,14 +212,25 @@ def _get_sid() -> str:
 def _get_state(create_if_missing: bool = True) -> Optional[SessionState]:
     sid = _get_sid()
     st = _sessions.get(sid)
-    if not st and create_if_missing:
-        st = SessionState(query=None, model=PredictionModel(), finished=False)
-        _sessions[sid] = st
+    if not st:
+        # Rehydrate state across workers using Flask session cookie
+        uid = session.get("user_id")
+        if uid is not None:
+            st = SessionState(query=None, model=PredictionModel(), finished=False)
+            st.user_id = int(uid)
+            _sessions[sid] = st
+        elif create_if_missing:
+            st = SessionState(query=None, model=PredictionModel(), finished=False)
+            _sessions[sid] = st
     return st
 
 
 app = Flask(__name__)
 app.secret_key = "dev-glucose-chef-secret"
+
+# Session cookie settings for stability across tabs/workers
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
 
 frontend_origins = [
     "https://ai-glucose-c1ly.vercel.app",  
@@ -249,6 +263,9 @@ def api_login():
     st = _get_state(create_if_missing=True)
     numeric_user_id = int(user_id)
     st.user_id = numeric_user_id
+    # Persist user_id into Flask session so it survives worker hops
+    session["user_id"] = numeric_user_id
+    session.permanent = True
     try:
         st.query = AIQuery(numeric_user_id)
     except Exception as e:
@@ -367,10 +384,16 @@ def api_update_profile():
 @app.get("/api/session")
 @cross_origin(origins=list(frontend_origins), supports_credentials=True)
 def api_session():
-    st = _get_state(create_if_missing=False)
-    if not st or st.user_id is None:
+    uid = session.get("user_id")
+    if uid is None:
         return jsonify({"ok": False, "error": "Not logged in."}), 401
-    return jsonify({"ok": True, "user_id": st.user_id})
+    # Optionally rehydrate state mapping for this sid
+    st = _get_state(create_if_missing=False)
+    if not st:
+        st = SessionState(query=None, model=PredictionModel(), finished=False)
+        st.user_id = int(uid)
+        _sessions[_get_sid()] = st
+    return jsonify({"ok": True, "user_id": int(uid)})
 
 
 def _safe_float(value: Any, default: Optional[float] = None) -> Optional[float]:
@@ -461,6 +484,13 @@ def api_send():
                         "finished": True})
 
     data = request.get_json(silent=True) or {}
+    client_msg_id = str(data.get("client_msg_id") or "").strip()
+    if client_msg_id:
+        last = session.get("last_msg_id")
+        if last == client_msg_id:
+            # Duplicate submission (e.g., tab re-send or network retry); ignore
+            return jsonify({"messages": []})
+        session["last_msg_id"] = client_msg_id
     msg = str(data.get("message", "")).strip()
     if not msg:
         return jsonify({"messages": [{"type": "system", "role": "System", "text": "Empty message."}]}), 400
