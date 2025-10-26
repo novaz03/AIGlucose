@@ -249,6 +249,11 @@ class AIQuery:
             "result": self._pipeline_result,
         }
 
+    async def Conclusion(self, result: str, b_is_safe: bool) -> str:
+        if not b_is_safe:
+            return "Based on the analysis, it seems that consuming steak for dinner may not be safe for your glucose levels. Please consider alternative meal options. Here's your glucose prediction. Stay safe!"
+        return "OK. You are safe to have steak for dinner. Here's your glucose prediction. Enjoy."
+
     def store_pipeline_result(self, result: Any) -> None:
         """Persist the pipeline output for retrieval via `RequestResult`."""
 
