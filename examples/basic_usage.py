@@ -1,4 +1,4 @@
-"""Example demonstrating the high-level API usage."""
+"""Example demonstrating the high-level API usage with multiple providers."""
 
 from __future__ import annotations
 

@@ -7,11 +7,20 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ai_query_interface import AIQuery
+import ai_query_interface
+from ai_query_interface import (
+    PROFILE_UPDATE_PROMPT_CHOICE,
+    PROFILE_UPDATE_DETAILS_PROMPT_TEXT,
+    PROFILE_UPDATE_FOLLOWUP_PROMPT_TEXT,
+    PROFILE_UPDATE_AWAITING_DECISION,
+    AIQuery,
+)
 from src.llm_module import workflow
 from src.llm_module.models import (
     ConversationPrompts,
@@ -30,6 +39,23 @@ def write_profile(storage_dir: Path, user_id: int, payload: dict[str, Any]) -> N
     storage_dir.mkdir(parents=True, exist_ok=True)
     profile_path = storage_dir / f"{user_id}.json"
     profile_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def reset_llm_env(monkeypatch):
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_EXTRA_OPTIONS", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_GENERATION_CONFIG", raising=False)
+    monkeypatch.delenv("GEMINI_SAFETY_SETTINGS", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("HUGGINGFACE_ENDPOINT_URL", raising=False)
+    monkeypatch.delenv("HUGGINGFACE_API_TOKEN", raising=False)
+    monkeypatch.delenv("LMSTUDIO_BASE_URL", raising=False)
+
+    # Default the provider to lmstudio for unit tests to avoid requiring secrets
+    monkeypatch.setenv("LLM_PROVIDER", "lmstudio")
 
 
 def test_ai_query_prefills_saved_health_profile(tmp_path, monkeypatch):
@@ -52,7 +78,83 @@ def test_ai_query_prefills_saved_health_profile(tmp_path, monkeypatch):
 
     assert not any(item[0] == "health" for item in query._questions)
     assert query._health_answers[:5] == ["25", "female", "60.0", "165.0", "type 1 diabetes"]
-    assert query._message_queue[-1].startswith("Using your saved health profile")
+    assert query._profile_is_complete is True
+    assert query._profile_update_state == PROFILE_UPDATE_PROMPT_CHOICE
+    assert query._profile_is_complete is True
+
+
+@pytest.mark.anyio
+async def test_ai_query_immediate_profile_update_flow(tmp_path):
+    storage_dir = tmp_path / "user_data"
+    profile = {
+        "age": 25,
+        "gender": "female",
+        "weight_kg": 58.0,
+        "height_cm": 165.0,
+        "underlying_disease": "type 1 diabetes",
+        "race": "asian",
+        "activity_level": "moderate",
+    }
+    write_profile(storage_dir, 88, profile)
+
+    query = AIQuery(88, storage_dir=storage_dir)
+
+    # Greeting
+    greeting = await query.Greeting()
+    assert "assistant" in greeting.lower()
+
+    # First prompt should be the profile update question
+    prompt = await query.QueryBody()
+    assert "review or update" in prompt.lower()
+
+    # Assistant should wait for a user decision
+    assert not query._message_queue
+
+    # LLM suggests updating weight with raw/accepted values
+    llm_payload = fenced_json(
+        {
+            "updates": [
+                {
+                    "question": "weight",
+                    "raw_value": "weight is 120 kg",
+                    "accepted_value": "120",
+                }
+            ]
+        }
+    )
+    query._client = StubClient(payload=llm_payload)
+
+    # User agrees to update
+    await query.ContinueQuery("yes")
+
+    # Assistant acknowledges and asks for details
+    follow_up = await query.QueryBody()
+    assert "great" in follow_up.lower()
+
+    next_prompt = await query.QueryBody()
+    assert PROFILE_UPDATE_DETAILS_PROMPT_TEXT.lower() in next_prompt.lower()
+
+    # User says weight is 120 kg
+    await query.ContinueQuery("weight is 120 kg")
+
+    # Confirmation messages should come next
+    updated_msg = await query.QueryBody()
+    assert "updated" in updated_msg.lower()
+    thanks_msgs = await query.QueryBody()
+    assert "thanks" in thanks_msgs.lower()
+
+    follow_up_prompt = await query.QueryBody()
+    assert PROFILE_UPDATE_FOLLOWUP_PROMPT_TEXT.lower() in follow_up_prompt.lower()
+
+    # User declines further updates
+    await query.ContinueQuery("no")
+    resume_prompt = await query.QueryBody()
+    assert "review or update" not in resume_prompt.lower()
+
+    # Weight should be updated and subsequent questions restored
+    assert query._health_answers[2] == "120.0"
+    assert query._profile_data["weight_kg"] == 120.0
+    assert query._questions
 
 
 def test_ai_query_prompts_when_profile_missing_required_fields(tmp_path):
@@ -69,7 +171,6 @@ def test_ai_query_prompts_when_profile_missing_required_fields(tmp_path):
     query = AIQuery(5, storage_dir=storage_dir)
 
     assert any(item[0] == "health" for item in query._questions)
-    assert not query._message_queue
 
 
 def test_build_user_prompt_contains_ingredient_guidance():
@@ -142,3 +243,112 @@ def test_request_food_breakdown_uses_provided_context():
     assert "Chicken stir fry" in prompt
     assert "type 2 diabetes" in prompt
 
+
+class StubClient:
+    def __init__(self, *, payload: str | Exception):
+        self.payload = payload
+        self.calls: int = 0
+
+    def complete(
+        self,
+        *,
+        prompt: str,
+        request_context: LLMRequestContext,
+        system_prompt: str | None = None,
+    ) -> str:
+        self.calls += 1
+        if isinstance(self.payload, Exception):
+            raise self.payload
+        return self.payload
+
+
+def fenced_json(payload: dict[str, object]) -> str:
+    return "```json\n" + json.dumps(payload) + "\n```"
+
+
+@pytest.mark.anyio
+async def test_continue_query_accepts_llm_validation(tmp_path):
+    query = AIQuery(101, storage_dir=tmp_path)
+    prompt = await query.QueryBody()
+    assert "age" in prompt
+
+    stub_response = fenced_json(
+        {
+            "question": "age",
+            "ask_again": False,
+            "accepted_value": "34",
+            "explanation": "Numeric age within range",
+        }
+    )
+    query._client = StubClient(payload=stub_response)
+
+    keep = await query.ContinueQuery("34")
+
+    assert keep is True
+    assert query._health_answers[0] == "34"
+    assert query._client.calls == 1
+    assert query._retry_message is None
+
+
+@pytest.mark.anyio
+async def test_continue_query_requests_retry_when_llm_flags_issue(tmp_path):
+    query = AIQuery(102, storage_dir=tmp_path)
+    await query.QueryBody()
+
+    stub_response = fenced_json(
+        {
+            "question": "age",
+            "ask_again": True,
+            "accepted_value": None,
+            "explanation": "Age must be a positive integer.",
+            "next_question": "Please provide your age as a positive whole number.",
+        }
+    )
+    query._client = StubClient(payload=stub_response)
+
+    keep = await query.ContinueQuery("-5")
+
+    assert keep is True
+    assert not query._health_answers
+    assert query._retry_message == "Age must be a positive integer."
+
+    follow_up = await query.QueryBody()
+    assert "Age must be a positive integer." in follow_up
+    assert "positive whole number" in follow_up
+
+
+@pytest.mark.anyio
+async def test_continue_query_uses_deterministic_validation_before_llm(tmp_path):
+    query = AIQuery(103, storage_dir=tmp_path)
+    await query.QueryBody()
+
+    def fail_complete(**_kwargs):
+        raise AssertionError("LLM should not be called for invalid numeric input")
+
+    query._client.complete = fail_complete  # type: ignore[assignment]
+
+    keep = await query.ContinueQuery("-10")
+
+    assert keep is True
+    assert not query._health_answers
+    assert query._retry_message == "Age must be a positive number."
+
+
+@pytest.mark.anyio
+async def test_continue_query_falls_back_when_llm_errors_optional(tmp_path):
+    query = AIQuery(104, storage_dir=tmp_path)
+    query._current_question = (
+        "meal",
+        "additional_notes",
+        "Any additional context I should know (activity, symptoms, etc.)?",
+        False,
+    )
+
+    query._client = StubClient(payload=RuntimeError("LLM offline"))
+
+    keep = await query.ContinueQuery("Feeling fine")
+
+    assert keep is True
+    assert query._meal_answers[-1] == "Feeling fine"
+    assert query._client.calls == 1
+    assert query._retry_message is None

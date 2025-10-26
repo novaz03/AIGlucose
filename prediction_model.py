@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 """PredictionModel: Sklearn Pipeline backend for CGMacros glucose curve prediction.
 Usage:
 
-    model = PredictionModel(artifact="path/to/model_dir_or_pkl",
+    model = PredictionModel(artifact="/Users/johnli/Desktop/Acedamic/College/4th Year/Semester 1/AIGlucose/ml_outputs_mlcurve_rf/",
                             n_jobs_targets=4, n_jobs_trees=1)
 
     # Single prediction

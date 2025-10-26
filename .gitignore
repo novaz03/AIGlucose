@@ -3,3 +3,5 @@ __pycache__/
 .vs/
 *.json
 .vscode/
+*.pkl
+.env

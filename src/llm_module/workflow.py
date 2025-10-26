@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
-from .clients import LLMClientBase
+from .clients import LLMClientBase, default_parser
 from .models import (
     ConversationPrompts,
     FoodAnalysisResponse,
@@ -17,10 +18,81 @@ from .models import (
     MealIntent,
     UserContext,
 )
-from .responses import build_system_prompt, build_user_prompt
+from .question_bank import (
+    HEALTH_FIELD_MAPPING,
+    HEALTH_REQUIRED_RETRY_MESSAGES,
+    REQUIRED_HEALTH_KEYS,
+    iter_health_question_specs,
+)
+from .responses import build_system_prompt, build_user_prompt, FOOD_ANALYSIS_SCHEMA
+from .providers.gemini_provider import GeminiClient
 
 
 DEFAULT_LMSTUDIO_MODEL = "openai/gpt-oss-20b"
+DEFAULT_GEMINI_MODEL = "models/gemini-2.5-pro"
+DEFAULT_GEMINI_TEMPERATURE = 0.6
+DEFAULT_GEMINI_MAX_OUTPUT_TOKENS = 20480
+
+
+def create_gemini_components(
+    *,
+    api_key: Optional[str] = None,
+    model_name: str = DEFAULT_GEMINI_MODEL,
+    temperature: float = DEFAULT_GEMINI_TEMPERATURE,
+    max_output_tokens: int = DEFAULT_GEMINI_MAX_OUTPUT_TOKENS,
+    generation_config_overrides: Optional[Dict[str, Any]] = None,
+    safety_settings: Optional[Any] = None,
+    parser=None,
+) -> Tuple[GeminiClient, LLMRequestContext]:
+    """Return a Gemini client and request context configured for food analysis.
+
+    Parameters
+    ----------
+    api_key:
+        Gemini server API key. Falls back to the ``GEMINI_API_KEY`` environment
+        variable when omitted.
+    model_name:
+        Gemini model identifier. Defaults to Gemini 2.5 Pro.
+    temperature:
+        Controls creativity/variance in the response.
+    max_output_tokens:
+        Caps the number of tokens Gemini may generate per response.
+    generation_config_overrides:
+        Optional dict merged into the default generation config.
+    safety_settings:
+        Optional Gemini safety settings payload (list or dict).
+    parser:
+        Optional structured-response parser. Defaults to :func:`default_parser`.
+    """
+
+    resolved_key = api_key or os.getenv("GEMINI_API_KEY")
+    if not resolved_key:
+        raise ValueError("Gemini API key must be provided via api_key or GEMINI_API_KEY env var")
+
+    generation_config = {
+        "temperature": temperature,
+        "max_output_tokens": max_output_tokens,
+    }
+    if generation_config_overrides:
+        generation_config.update(generation_config_overrides)
+
+    extra_options: Dict[str, Any] = {"generation_config": generation_config.copy()}
+    if safety_settings is not None:
+        extra_options["safety_settings"] = safety_settings
+
+    request_context = LLMRequestContext(
+        model_name=model_name,
+        extra_options=extra_options,
+    )
+
+    client = GeminiClient(
+        parser=parser or default_parser(),
+        api_key=resolved_key,
+        default_generation_config=generation_config,
+        default_safety_settings=safety_settings,
+    )
+
+    return client, request_context
 
 
 class HealthSessionManager:
@@ -63,59 +135,13 @@ class HealthSessionManager:
 
         existing_data = existing or HealthInfo()
 
-        age = _collect_required_value(
-            existing_value=existing_data.age,
-            question="What is your age in years?",
-            parser=_safe_int,
+        collected_values = _collect_health_profile(
             prompts=self._prompts,
-            retry_message="Please provide your age as a number in years.",
-        )
-        gender = _collect_required_value(
-            existing_value=existing_data.gender,
-            question="What is your gender?",
-            parser=_safe_str,
-            prompts=self._prompts,
-            retry_message="Please share your gender so I can personalise guidance.",
-        )
-        weight = _collect_required_value(
-            existing_value=existing_data.weight_kg,
-            question="What is your current weight in kilograms?",
-            parser=_safe_float,
-            prompts=self._prompts,
-            retry_message="Please provide your weight in kilograms.",
-        )
-        height = _collect_required_value(
-            existing_value=existing_data.height_cm,
-            question="What is your height in centimetres?",
-            parser=_safe_float,
-            prompts=self._prompts,
-            retry_message="Please provide your height in centimetres.",
-        )
-        disease = _collect_required_value(
-            existing_value=existing_data.underlying_disease,
-            question="What underlying disease or type of diabetes do you have?",
-            parser=_safe_str,
-            prompts=self._prompts,
-            retry_message="I need to know your underlying condition to proceed.",
-        )
-
-        race = _ask_optional(
-            "How would you describe your race or ethnicity?",
-            existing_data.race,
-        )
-        activity = _ask_optional(
-            "How would you describe your recent exercise or activity level?",
-            existing_data.activity_level,
+            existing=existing_data,
         )
 
         health_info = HealthInfo(
-            age=age,
-            gender=gender,
-            weight_kg=weight,
-            height_cm=height,
-            underlying_disease=disease,
-            race=race,
-            activity_level=activity,
+            **collected_values,
             medications=existing_data.medications,
             allergies=existing_data.allergies,
             dietary_preferences=existing_data.dietary_preferences,
@@ -148,6 +174,9 @@ class LLMOrchestrator:
 
         system_prompt = build_system_prompt()
         user_prompt = build_user_prompt(context_json=context_json)
+
+        # Set up structured output format
+        request_context.response_format = FOOD_ANALYSIS_SCHEMA
 
         return self._client.generate_structured(
             prompt=user_prompt,
@@ -322,17 +351,14 @@ def _safe_str(raw: Optional[str]) -> Optional[str]:
 
 
 def _has_required_health_fields(health_info: HealthInfo) -> bool:
-    return all(
-        getattr(health_info, field) is not None
-        for field in ("age", "gender", "weight_kg", "height_cm", "underlying_disease")
-    )
+    return all(getattr(health_info, _to_model_field(field)) is not None for field in REQUIRED_HEALTH_KEYS)
 
 
 def _missing_health_fields(health_info: HealthInfo) -> list[str]:
     return [
         field
-        for field in ("age", "gender", "weight_kg", "height_cm", "underlying_disease")
-        if getattr(health_info, field) is None
+        for field in REQUIRED_HEALTH_KEYS
+        if getattr(health_info, _to_model_field(field)) is None
     ]
 
 
@@ -353,6 +379,54 @@ def _collect_required_value(
         if parsed is not None:
             return parsed
         prompts.notify(retry_message)
+
+
+def _collect_health_profile(
+    *, prompts: ConversationPrompts, existing: HealthInfo
+) -> dict[str, Any]:
+    collected: dict[str, Any] = {
+        _to_model_field(spec.key): getattr(existing, _to_model_field(spec.key))
+        for spec in iter_health_question_specs()
+    }
+
+    for spec in iter_health_question_specs():
+        field_name = _to_model_field(spec.key)
+        current_value = collected.get(field_name)
+        parser = _parser_for_question(spec.key)
+
+        if spec.required:
+            retry_message = HEALTH_REQUIRED_RETRY_MESSAGES.get(
+                spec.key, f"Please provide your {spec.key.replace('_', ' ')}."
+            )
+            collected[field_name] = _collect_required_value(
+                existing_value=current_value,
+                question=spec.prompt,
+                parser=parser,
+                prompts=prompts,
+                retry_message=retry_message,
+            )
+            continue
+
+        if current_value is not None:
+            continue
+        raw = prompts.ask_health_info(spec.prompt)
+        parsed = parser(raw)
+        if parsed is not None:
+            collected[field_name] = parsed
+
+    return collected
+
+
+def _parser_for_question(key: str) -> Callable[[Optional[str]], Optional[Any]]:
+    if key in {"age"}:
+        return _safe_int
+    if key in {"weight", "height", "current_glucose_mg_dl"}:
+        return _safe_float
+    return _safe_str
+
+
+def _to_model_field(question_key: str) -> str:
+    return HEALTH_FIELD_MAPPING.get(question_key, question_key)
 
 
 def _persist_pipeline_result(*, profile_path: Path, result_payload: dict[str, Any]) -> None:
@@ -379,6 +453,7 @@ __all__ = [
     "HealthSessionManager",
     "LLMOrchestrator",
     "collect_user_context",
+    "create_gemini_components",
     "ensure_user_health_profile",
     "run_food_analysis_pipeline",
 ]

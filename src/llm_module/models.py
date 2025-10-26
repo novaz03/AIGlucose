@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -141,6 +141,73 @@ class LLMRequestContext(BaseModel):
     model_name: str = Field(..., description="Provider specific model identifier")
     extra_options: Dict[str, object] = Field(
         default_factory=dict, description="Additional provider kwargs"
+    )
+    response_format: Optional[Dict[str, object]] = Field(
+        None, description="JSON schema for structured output format"
+    )
+
+
+class QuestionEvaluation(BaseModel):
+    """LLM-evaluated result for a single conversational answer."""
+
+    question: str = Field(
+        ...,
+        description="Identifier or short label for the question being evaluated",
+    )
+    ask_again: bool = Field(
+        ...,
+        description="True if the assistant should repeat the question to the user",
+    )
+    accepted_value: Optional[str] = Field(
+        None,
+        description=(
+            "Reasonable, cleaned-up value to persist when the user input is acceptable."
+        ),
+    )
+    explanation: Optional[str] = Field(
+        None,
+        description=(
+            "Short justification for the decision or guidance to share with the user."
+        ),
+    )
+    next_question: Optional[str] = Field(
+        None,
+        description=(
+            "Suggested follow-up phrasing to use if the question needs to be asked"
+            " again."
+        ),
+    )
+    invalid_type: Optional[Literal["unclear_question", "invalid_value"]] = Field(
+        None,
+        description="Type of validation issue: unclear_question when user doesn't understand the question, invalid_value when the answer is invalid"
+    )
+
+
+class ProfileUpdateItem(BaseModel):
+    """Single field update returned from a profile revision prompt."""
+
+    question: str = Field(..., description="Profile field identifier to update")
+    accepted_value: Optional[str] = Field(
+        None,
+        description="Cleaned value proposed for the profile field.",
+    )
+    raw_value: Optional[str] = Field(
+        None,
+        description="Original value extracted from the user's update request.",
+    )
+    explanation: Optional[str] = Field(
+        None,
+        description="Short rationale describing the change or missing data.",
+    )
+
+
+class ProfileUpdateResponse(BaseModel):
+    """Array wrapper describing proposed profile updates."""
+
+    updates: List[ProfileUpdateItem] = Field(default_factory=list)
+    should_ask_again: bool = Field(
+        default=False,
+        description="Whether to ask the user for clarification before proceeding"
     )
 
 

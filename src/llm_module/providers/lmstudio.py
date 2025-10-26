@@ -18,7 +18,7 @@ class LMStudioClient(LLMClientBase):
         self,
         *,
         parser,
-        base_url: str = "http://10.232.226.27:1234/v1",
+        base_url: str = "http://127.0.0.1:1234/v1",
         timeout: int = 60,
         session: Optional[requests.Session] = None,
     ) -> None:
@@ -47,6 +47,10 @@ class LMStudioClient(LLMClientBase):
             "messages": messages,
             **request_context.extra_options,
         }
+        
+        # Add response_format if provided
+        if request_context.response_format:
+            payload["response_format"] = request_context.response_format
 
         try:
             response = self._session.post(

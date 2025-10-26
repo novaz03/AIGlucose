@@ -12,8 +12,18 @@ from .models import (
     HealthInfo,
     HealthInfoRepository,
     LLMRequestContext,
+    QuestionEvaluation,
     MealIntent,
     UserContext,
+)
+from .question_bank import (
+    HEALTH_FIELD_MAPPING,
+    HEALTH_QUESTION_ORDER,
+    HEALTH_REQUIRED_RETRY_MESSAGES,
+    MEAL_QUESTION_KEYS,
+    QUESTION_SPECS,
+    QUESTION_SPEC_BY_KEY,
+    REQUIRED_HEALTH_KEYS,
 )
 from .responses import (
     LLM_STUDIO_RESPONSE_SCHEMA,
@@ -65,6 +75,11 @@ def create_client(
 
         return HuggingFaceClient(parser=parser, **kwargs)
 
+    if provider_key == "gemini":
+        from .providers.gemini_provider import GeminiClient
+
+        return GeminiClient(parser=parser, **kwargs)
+
     raise ValueError(f"Unsupported provider '{provider}'.")
 
 
@@ -85,6 +100,7 @@ __all__ = [
     "HealthSessionManager",
     "LLMClientBase",
     "LLMRequestContext",
+    "QuestionEvaluation",
     "LLM_STUDIO_RESPONSE_SCHEMA",
     "LLMOrchestrator",
     "MealIntent",
@@ -94,8 +110,16 @@ __all__ = [
     "collect_user_context",
     "create_client",
     "create_session_manager",
+    "HEALTH_FIELD_MAPPING",
+    "HEALTH_QUESTION_ORDER",
+    "HEALTH_REQUIRED_RETRY_MESSAGES",
+    "MEAL_QUESTION_KEYS",
     "default_parser",
     "ensure_user_health_profile",
     "run_food_analysis_pipeline",
+    "QUESTION_SPECS",
+    "QUESTION_SPEC_BY_KEY",
+    "REQUIRED_HEALTH_KEYS",
+    "GeminiClient",
 ]
 
