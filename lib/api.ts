@@ -29,7 +29,7 @@ export async function greet() {
 }
 
 export async function sendMessage(message: string) {
-  const response = await fetch(`$/api/send`, {
+  const response = await fetch(`/api/send`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
