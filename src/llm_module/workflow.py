@@ -17,7 +17,13 @@ from .models import (
     MealIntent,
     UserContext,
 )
-from .responses import build_system_prompt, build_user_prompt
+from .question_bank import (
+    HEALTH_FIELD_MAPPING,
+    HEALTH_REQUIRED_RETRY_MESSAGES,
+    REQUIRED_HEALTH_KEYS,
+    iter_health_question_specs,
+)
+from .responses import build_system_prompt, build_user_prompt, FOOD_ANALYSIS_SCHEMA
 
 
 DEFAULT_LMSTUDIO_MODEL = "openai/gpt-oss-20b"
@@ -63,59 +69,13 @@ class HealthSessionManager:
 
         existing_data = existing or HealthInfo()
 
-        age = _collect_required_value(
-            existing_value=existing_data.age,
-            question="What is your age in years?",
-            parser=_safe_int,
+        collected_values = _collect_health_profile(
             prompts=self._prompts,
-            retry_message="Please provide your age as a number in years.",
-        )
-        gender = _collect_required_value(
-            existing_value=existing_data.gender,
-            question="What is your gender?",
-            parser=_safe_str,
-            prompts=self._prompts,
-            retry_message="Please share your gender so I can personalise guidance.",
-        )
-        weight = _collect_required_value(
-            existing_value=existing_data.weight_kg,
-            question="What is your current weight in kilograms?",
-            parser=_safe_float,
-            prompts=self._prompts,
-            retry_message="Please provide your weight in kilograms.",
-        )
-        height = _collect_required_value(
-            existing_value=existing_data.height_cm,
-            question="What is your height in centimetres?",
-            parser=_safe_float,
-            prompts=self._prompts,
-            retry_message="Please provide your height in centimetres.",
-        )
-        disease = _collect_required_value(
-            existing_value=existing_data.underlying_disease,
-            question="What underlying disease or type of diabetes do you have?",
-            parser=_safe_str,
-            prompts=self._prompts,
-            retry_message="I need to know your underlying condition to proceed.",
-        )
-
-        race = _ask_optional(
-            "How would you describe your race or ethnicity?",
-            existing_data.race,
-        )
-        activity = _ask_optional(
-            "How would you describe your recent exercise or activity level?",
-            existing_data.activity_level,
+            existing=existing_data,
         )
 
         health_info = HealthInfo(
-            age=age,
-            gender=gender,
-            weight_kg=weight,
-            height_cm=height,
-            underlying_disease=disease,
-            race=race,
-            activity_level=activity,
+            **collected_values,
             medications=existing_data.medications,
             allergies=existing_data.allergies,
             dietary_preferences=existing_data.dietary_preferences,
@@ -148,6 +108,9 @@ class LLMOrchestrator:
 
         system_prompt = build_system_prompt()
         user_prompt = build_user_prompt(context_json=context_json)
+
+        # Set up structured output format
+        request_context.response_format = FOOD_ANALYSIS_SCHEMA
 
         return self._client.generate_structured(
             prompt=user_prompt,
@@ -322,17 +285,14 @@ def _safe_str(raw: Optional[str]) -> Optional[str]:
 
 
 def _has_required_health_fields(health_info: HealthInfo) -> bool:
-    return all(
-        getattr(health_info, field) is not None
-        for field in ("age", "gender", "weight_kg", "height_cm", "underlying_disease")
-    )
+    return all(getattr(health_info, _to_model_field(field)) is not None for field in REQUIRED_HEALTH_KEYS)
 
 
 def _missing_health_fields(health_info: HealthInfo) -> list[str]:
     return [
         field
-        for field in ("age", "gender", "weight_kg", "height_cm", "underlying_disease")
-        if getattr(health_info, field) is None
+        for field in REQUIRED_HEALTH_KEYS
+        if getattr(health_info, _to_model_field(field)) is None
     ]
 
 
@@ -353,6 +313,54 @@ def _collect_required_value(
         if parsed is not None:
             return parsed
         prompts.notify(retry_message)
+
+
+def _collect_health_profile(
+    *, prompts: ConversationPrompts, existing: HealthInfo
+) -> dict[str, Any]:
+    collected: dict[str, Any] = {
+        _to_model_field(spec.key): getattr(existing, _to_model_field(spec.key))
+        for spec in iter_health_question_specs()
+    }
+
+    for spec in iter_health_question_specs():
+        field_name = _to_model_field(spec.key)
+        current_value = collected.get(field_name)
+        parser = _parser_for_question(spec.key)
+
+        if spec.required:
+            retry_message = HEALTH_REQUIRED_RETRY_MESSAGES.get(
+                spec.key, f"Please provide your {spec.key.replace('_', ' ')}."
+            )
+            collected[field_name] = _collect_required_value(
+                existing_value=current_value,
+                question=spec.prompt,
+                parser=parser,
+                prompts=prompts,
+                retry_message=retry_message,
+            )
+            continue
+
+        if current_value is not None:
+            continue
+        raw = prompts.ask_health_info(spec.prompt)
+        parsed = parser(raw)
+        if parsed is not None:
+            collected[field_name] = parsed
+
+    return collected
+
+
+def _parser_for_question(key: str) -> Callable[[Optional[str]], Optional[Any]]:
+    if key in {"age"}:
+        return _safe_int
+    if key in {"weight", "height", "current_glucose_mg_dl"}:
+        return _safe_float
+    return _safe_str
+
+
+def _to_model_field(question_key: str) -> str:
+    return HEALTH_FIELD_MAPPING.get(question_key, question_key)
 
 
 def _persist_pipeline_result(*, profile_path: Path, result_payload: dict[str, Any]) -> None:

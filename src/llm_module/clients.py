@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
 from .models import FoodAnalysisResponse, LLMRequestContext
+from .utils import strip_json_code_fence
 
 
 class LLMClientError(RuntimeError):
@@ -52,10 +53,20 @@ class LLMClientBase(ABC):
             system_prompt=system_prompt,
         )
 
-        try:
-            return self._parser.parse(raw_output)
-        except ValueError as exc:  # pragma: no cover - defensive
-            raise LLMClientError(f"Failed to parse LLM output: {exc}") from exc
+        # If response_format is provided, the model should return structured output
+        if request_context.response_format:
+            try:
+                # Parse the structured response directly
+                parsed_data = json.loads(raw_output)
+                return FoodAnalysisResponse.model_validate(parsed_data)
+            except (json.JSONDecodeError, ValueError) as exc:
+                raise LLMClientError(f"Failed to parse structured LLM output: {exc}") from exc
+        else:
+            # Fall back to parser for backward compatibility
+            try:
+                return self._parser.parse(raw_output)
+            except ValueError as exc:  # pragma: no cover - defensive
+                raise LLMClientError(f"Failed to parse LLM output: {exc}") from exc
 
 
 def default_parser() -> StructuredResponseParser:
@@ -64,7 +75,7 @@ def default_parser() -> StructuredResponseParser:
     class _Parser:
         def parse(self, raw_output: str) -> FoodAnalysisResponse:  # noqa: D401
             try:
-                payload: Dict[str, Any] = json.loads(raw_output)
+                payload: Dict[str, Any] = json.loads(strip_json_code_fence(raw_output))
             except json.JSONDecodeError as exc:  # pragma: no cover - defensive
                 raise ValueError(f"Expected JSON string from LLM, received: {raw_output}") from exc
 

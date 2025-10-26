@@ -35,12 +35,19 @@ class OpenAIClient(LLMClientBase):
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": prompt})
 
+        # Prepare request parameters
+        request_params = {
+            "model": request_context.model_name,
+            "messages": messages,
+            **request_context.extra_options,
+        }
+        
+        # Add response_format if provided
+        if request_context.response_format:
+            request_params["response_format"] = request_context.response_format
+
         try:
-            chat_completion = self._client.chat.completions.create(
-                model=request_context.model_name,
-                messages=messages,
-                **request_context.extra_options,
-            )
+            chat_completion = self._client.chat.completions.create(**request_params)
         except Exception as exc:  # pragma: no cover - network dependent
             raise LLMClientError(f"OpenAI request failed: {exc}") from exc
 
