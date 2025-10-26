@@ -75,6 +75,11 @@ def create_client(
 
         return HuggingFaceClient(parser=parser, **kwargs)
 
+    if provider_key == "gemini":
+        from .providers.gemini_provider import GeminiClient
+
+        return GeminiClient(parser=parser, **kwargs)
+
     raise ValueError(f"Unsupported provider '{provider}'.")
 
 
@@ -115,5 +120,6 @@ __all__ = [
     "QUESTION_SPECS",
     "QUESTION_SPEC_BY_KEY",
     "REQUIRED_HEALTH_KEYS",
+    "GeminiClient",
 ]
 

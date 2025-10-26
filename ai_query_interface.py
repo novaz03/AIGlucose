@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+import os
 from collections import deque
 from datetime import datetime
 from pathlib import Path
@@ -29,6 +31,76 @@ from src.llm_module.responses import (
 )
 from src.llm_module.utils import strip_json_code_fence
 from src.llm_module.workflow import DEFAULT_LMSTUDIO_MODEL
+
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_json_dict(raw: Optional[str]) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("Invalid JSON provided in environment variable; ignoring value.")
+        return {}
+
+    if isinstance(parsed, dict):
+        return parsed
+    logger.warning("Expected a JSON object but received %s; ignoring value.", type(parsed).__name__)
+    return {}
+
+
+def _build_llm_configuration() -> tuple[Any, LLMRequestContext]:
+    provider = os.getenv("LLM_PROVIDER", "lmstudio").strip().lower() or "lmstudio"
+    model_name = os.getenv("LLM_MODEL") or DEFAULT_LMSTUDIO_MODEL
+
+    request_extra_options = _parse_json_dict(os.getenv("LLM_EXTRA_OPTIONS"))
+    client_kwargs: dict[str, Any] = {}
+
+    if provider == "gemini":
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY must be set when LLM_PROVIDER=gemini")
+        client_kwargs["api_key"] = api_key
+
+        default_generation = _parse_json_dict(os.getenv("GEMINI_GENERATION_CONFIG"))
+        if default_generation:
+            client_kwargs["default_generation_config"] = default_generation
+
+        safety_settings_raw = os.getenv("GEMINI_SAFETY_SETTINGS")
+        if safety_settings_raw:
+            try:
+                client_kwargs["default_safety_settings"] = json.loads(safety_settings_raw)
+            except json.JSONDecodeError:
+                logger.warning("Invalid JSON for GEMINI_SAFETY_SETTINGS; ignoring value.")
+
+    elif provider == "openai":
+        api_key = os.getenv("OPENAI_API_KEY")
+        if api_key:
+            client_kwargs["api_key"] = api_key
+
+    elif provider in {"huggingface", "hf"}:
+        endpoint = os.getenv("HUGGINGFACE_ENDPOINT_URL")
+        if endpoint:
+            client_kwargs["endpoint_url"] = endpoint
+        token = os.getenv("HUGGINGFACE_API_TOKEN")
+        if token:
+            client_kwargs["api_token"] = token
+
+    elif provider == "lmstudio":
+        base_url = os.getenv("LMSTUDIO_BASE_URL")
+        if base_url:
+            client_kwargs["base_url"] = base_url
+
+    client = create_client(provider, **client_kwargs)
+
+    request_context = LLMRequestContext(
+        model_name=model_name,
+        extra_options=request_extra_options,
+    )
+
+    return client, request_context
 
 
 PROFILE_UPDATE_PROMPT_TEXT = "Would you like to review or update your saved health profile?"
@@ -79,8 +151,7 @@ class AIQuery:
         self._profile_is_complete = False
         self._stored_questions_post_prefill: deque[tuple[str, str, str, bool]] | None = None
 
-        self._client = create_client("lmstudio")
-        self._request_context = LLMRequestContext(model_name=DEFAULT_LMSTUDIO_MODEL)
+        self._client, self._request_context = _build_llm_configuration()
         default_storage = Path(__file__).resolve().parent / "user_data"
         self._storage_dir = storage_dir or default_storage
         self._prefill_saved_health_profile()

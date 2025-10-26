@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
-from .clients import LLMClientBase
+from .clients import LLMClientBase, default_parser
 from .models import (
     ConversationPrompts,
     FoodAnalysisResponse,
@@ -24,9 +25,74 @@ from .question_bank import (
     iter_health_question_specs,
 )
 from .responses import build_system_prompt, build_user_prompt, FOOD_ANALYSIS_SCHEMA
+from .providers.gemini_provider import GeminiClient
 
 
 DEFAULT_LMSTUDIO_MODEL = "openai/gpt-oss-20b"
+DEFAULT_GEMINI_MODEL = "models/gemini-2.5-pro"
+DEFAULT_GEMINI_TEMPERATURE = 0.6
+DEFAULT_GEMINI_MAX_OUTPUT_TOKENS = 20480
+
+
+def create_gemini_components(
+    *,
+    api_key: Optional[str] = None,
+    model_name: str = DEFAULT_GEMINI_MODEL,
+    temperature: float = DEFAULT_GEMINI_TEMPERATURE,
+    max_output_tokens: int = DEFAULT_GEMINI_MAX_OUTPUT_TOKENS,
+    generation_config_overrides: Optional[Dict[str, Any]] = None,
+    safety_settings: Optional[Any] = None,
+    parser=None,
+) -> Tuple[GeminiClient, LLMRequestContext]:
+    """Return a Gemini client and request context configured for food analysis.
+
+    Parameters
+    ----------
+    api_key:
+        Gemini server API key. Falls back to the ``GEMINI_API_KEY`` environment
+        variable when omitted.
+    model_name:
+        Gemini model identifier. Defaults to Gemini 2.5 Pro.
+    temperature:
+        Controls creativity/variance in the response.
+    max_output_tokens:
+        Caps the number of tokens Gemini may generate per response.
+    generation_config_overrides:
+        Optional dict merged into the default generation config.
+    safety_settings:
+        Optional Gemini safety settings payload (list or dict).
+    parser:
+        Optional structured-response parser. Defaults to :func:`default_parser`.
+    """
+
+    resolved_key = api_key or os.getenv("GEMINI_API_KEY")
+    if not resolved_key:
+        raise ValueError("Gemini API key must be provided via api_key or GEMINI_API_KEY env var")
+
+    generation_config = {
+        "temperature": temperature,
+        "max_output_tokens": max_output_tokens,
+    }
+    if generation_config_overrides:
+        generation_config.update(generation_config_overrides)
+
+    extra_options: Dict[str, Any] = {"generation_config": generation_config.copy()}
+    if safety_settings is not None:
+        extra_options["safety_settings"] = safety_settings
+
+    request_context = LLMRequestContext(
+        model_name=model_name,
+        extra_options=extra_options,
+    )
+
+    client = GeminiClient(
+        parser=parser or default_parser(),
+        api_key=resolved_key,
+        default_generation_config=generation_config,
+        default_safety_settings=safety_settings,
+    )
+
+    return client, request_context
 
 
 class HealthSessionManager:
@@ -387,6 +453,7 @@ __all__ = [
     "HealthSessionManager",
     "LLMOrchestrator",
     "collect_user_context",
+    "create_gemini_components",
     "ensure_user_health_profile",
     "run_food_analysis_pipeline",
 ]

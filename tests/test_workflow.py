@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import ai_query_interface
 from ai_query_interface import (
     PROFILE_UPDATE_PROMPT_CHOICE,
     PROFILE_UPDATE_DETAILS_PROMPT_TEXT,
@@ -38,6 +39,23 @@ def write_profile(storage_dir: Path, user_id: int, payload: dict[str, Any]) -> N
     storage_dir.mkdir(parents=True, exist_ok=True)
     profile_path = storage_dir / f"{user_id}.json"
     profile_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+@pytest.fixture(autouse=True)
+def reset_llm_env(monkeypatch):
+    monkeypatch.delenv("LLM_PROVIDER", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("LLM_EXTRA_OPTIONS", raising=False)
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GEMINI_GENERATION_CONFIG", raising=False)
+    monkeypatch.delenv("GEMINI_SAFETY_SETTINGS", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("HUGGINGFACE_ENDPOINT_URL", raising=False)
+    monkeypatch.delenv("HUGGINGFACE_API_TOKEN", raising=False)
+    monkeypatch.delenv("LMSTUDIO_BASE_URL", raising=False)
+
+    # ensure default configuration is restored
+    ai_query_interface._build_llm_configuration.cache_clear() if hasattr(ai_query_interface._build_llm_configuration, "cache_clear") else None
 
 
 def test_ai_query_prefills_saved_health_profile(tmp_path, monkeypatch):
