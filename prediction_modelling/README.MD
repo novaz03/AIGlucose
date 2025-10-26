@@ -75,14 +75,7 @@ cgmacros_pipeline/
 
 ## Installation
 
-Use your preferred Python 3.10+ environment.
-
-```bash
-# In the repo root:
-pip install -e .
-```
-
-(If you use Conda, ensure `numpy`, `pandas`, `scikit-learn`, `tqdm`, `joblib`, `matplotlib` are available.)
+You may use the provided `environment.yaml` file to create a conda environment. The environment configuration requires Unix-based OS and `CUDA`.
 
 ---
 
@@ -188,6 +181,7 @@ payload = {
   "meal_bucket": "Lunch",
   "baseline_avg_glucose": 110,
   "carbs_g": 75, "protein_g": 25, "fat_g": 20, "fiber_g": 8,
+  "meal_calories": 500,
   "Age": 44, "Gender": "Male",
   "Body weight": 82, "Height": 178,
   # Optional:
@@ -213,24 +207,6 @@ We report MSE for:
 
 This tells you if the learned model meaningfully beats trivial baselines.
 
----
-
-## Troubleshooting
-
-- **No glucose column found**  
-  Ensure at least one of `Dexcom GL` or `Libre GL` exists and is non-empty.
-
-- **No timestamp column found**  
-  Include a recognizable column (`Timestamp`, `Time`, `DateTime`).
-
-- **Sparse meal annotations**  
-  Segments will still build using CGM; macros may be `NaN` and imputed during training.
-
-- **Mismatched patient IDs**  
-  The merge step canonicalizes IDs, but if you still see missing bio fields, confirm the ID column in `bio.csv` and normalize (e.g., `001` vs `1`).
-
-- **Over-smooth predictions**  
-  Try increasing RF `n_estimators`, reducing `min_samples_leaf`, or incorporating `activity_cal_mean`/`mets_mean`, which often improves curve shape.
 
 ---
 
