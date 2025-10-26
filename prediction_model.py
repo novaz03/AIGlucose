@@ -12,6 +12,11 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import joblib
+import matplotlib
+
+# Force a headless backend so Cocoa/Tk windows are never created server-side.
+matplotlib.use("Agg", force=True)
+
 import matplotlib.pyplot as plt
 
 

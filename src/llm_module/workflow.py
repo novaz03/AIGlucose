@@ -16,6 +16,7 @@ from .models import (
     HealthInfoRepository,
     LLMRequestContext,
     MealIntent,
+    Recipe,
     UserContext,
 )
 from .question_bank import (
@@ -123,30 +124,10 @@ class HealthSessionManager:
         """Ensure health info exists, prompting user if needed."""
 
         existing = self.load()
-        if existing and _has_required_health_fields(existing):
+        if existing is not None:
             return existing
 
-        self._prompts.notify("We need some health details to personalise guidance.")
-
-        def _ask_optional(prompt: str, existing_value: Optional[str]) -> Optional[str]:
-            if existing_value:
-                return existing_value
-            return _safe_str(self._prompts.ask_health_info(prompt))
-
-        existing_data = existing or HealthInfo()
-
-        collected_values = _collect_health_profile(
-            prompts=self._prompts,
-            existing=existing_data,
-        )
-
-        health_info = HealthInfo(
-            **collected_values,
-            medications=existing_data.medications,
-            allergies=existing_data.allergies,
-            dietary_preferences=existing_data.dietary_preferences,
-        )
-
+        health_info = HealthInfo()
         self._repository.save(health_info)
         self._cached = health_info
         return health_info
@@ -193,29 +174,16 @@ def collect_user_context(
     """Collect or reuse health info and capture meal intent from the user."""
 
     health_info = session_manager.ensure_health_info()
-
-    glucose_raw = prompts.ask_meal_intent(
-        "What is your current blood glucose level (mg/dL)?"
-    )
     desired_food = prompts.ask_meal_intent(
-        "What food or meal are you considering right now?"
-    )
-    portion = prompts.ask_meal_intent(
-        "How much of that food do you plan to eat (portion size or quantity)?"
-    )
-    timeframe = prompts.ask_meal_intent(
-        "When do you plan to eat it?"
-    )
-    notes = prompts.ask_meal_intent(
-        "Any additional context I should know (activity, symptoms, etc.)?"
+        "Which dish or set of ingredients would you like a low-GI, balanced recipe for today?"
     )
 
     meal_intent = MealIntent(
-        current_glucose_mg_dl=_safe_float(glucose_raw),
         desired_food=_safe_str(desired_food),
-        meal_timeframe=_safe_str(timeframe),
-        additional_notes=_safe_str(notes),
-        portion_size_description=_safe_str(portion),
+        current_glucose_mg_dl=None,
+        meal_timeframe=None,
+        additional_notes=None,
+        portion_size_description=None,
     )
 
     return UserContext(health_info=health_info, meal_intent=meal_intent)
@@ -287,13 +255,11 @@ def run_food_analysis_pipeline(
     health_info = session_manager.ensure_health_info()
 
     if not _has_required_health_fields(health_info):
-        missing = _missing_health_fields(health_info)
+        missing = ", ".join(_missing_health_fields(health_info))
         prompts.notify(
-            "Missing required health information: " + ", ".join(missing)
+            "Please complete your profile (" + missing + ") before requesting a recipe."
         )
         raise ValueError("Required health parameters not provided.")
-
-    prompts.notify("Analysing your data and getting a recommendation now.")
 
     user_context = collect_user_context(session_manager=session_manager, prompts=prompts)
 
@@ -305,14 +271,16 @@ def run_food_analysis_pipeline(
 
     result = FoodAnalysisResult(
         health_parameters=user_context.health_info,
-        food=response.food,
-        notes=response.notes,
+        recipe=response.recipe,
     )
     result_payload = result.model_dump(exclude_none=True)
     _persist_pipeline_result(
         profile_path=storage_dir / f"{ai_query.user_id}.json",
         result_payload=result_payload,
     )
+    json_message, pretty_message = _build_recipe_output_messages(response.recipe)
+    prompts.notify(json_message)
+    prompts.notify(pretty_message)
     ai_query.store_pipeline_result(result_payload)
     ai_query.stop()
 
@@ -442,11 +410,44 @@ def _persist_pipeline_result(*, profile_path: Path, result_payload: dict[str, An
         profile_data = {}
 
     serializable_result = json.loads(json.dumps(result_payload, default=str))
-    profile_data["last_food_analysis"] = serializable_result
+    profile_data["last_recipe"] = serializable_result
 
     profile_path.parent.mkdir(parents=True, exist_ok=True)
     with profile_path.open("w", encoding="utf-8") as fh:
         json.dump(profile_data, fh, indent=2)
+
+
+def _build_recipe_output_messages(recipe: Recipe) -> tuple[str, str]:
+    """Build both the structured JSON payload and a human-readable summary."""
+
+    json_payload = recipe.model_dump_json(indent=2)
+    json_prefixed = f"Recipe = {json_payload}"
+    return json_prefixed, _format_recipe_message(recipe)
+
+
+def _format_recipe_message(recipe: Recipe) -> str:
+    """Create a human-readable recipe summary."""
+
+    title = (recipe.title or "Recipe").strip() or "Recipe"
+    lines: list[str] = [title]
+
+    if recipe.ingredients:
+        lines.append("")
+        lines.append("Ingredients:")
+        for ingredient in recipe.ingredients:
+            amount = (ingredient.amount or "").strip()
+            if amount:
+                lines.append(f"- {ingredient.name} - {amount}")
+            else:
+                lines.append(f"- {ingredient.name}")
+
+    if recipe.steps:
+        lines.append("")
+        lines.append("Steps:")
+        for index, step in enumerate(recipe.steps, start=1):
+            lines.append(f"{index}. {step}")
+
+    return "\n".join(lines).strip()
 
 
 __all__ = [
@@ -457,4 +458,3 @@ __all__ = [
     "ensure_user_health_profile",
     "run_food_analysis_pipeline",
 ]
-
