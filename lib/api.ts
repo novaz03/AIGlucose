@@ -2,7 +2,7 @@
 const API_BASE_URL = 'http://34.66.204.223:2467';
 
 export async function login(userId: string) {
-  const response = await fetch(`${API_BASE_URL}/api/login`, {
+  const response = await fetch(`/api/login`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -18,7 +18,7 @@ export async function login(userId: string) {
 }
 
 export async function greet() {
-  const response = await fetch(`${API_BASE_URL}/api/greet`, {
+  const response = await fetch(`/api/greet`, {
     method: 'POST',
     credentials: 'include',
   });
@@ -29,7 +29,7 @@ export async function greet() {
 }
 
 export async function sendMessage(message: string) {
-  const response = await fetch(`${API_BASE_URL}/api/send`, {
+  const response = await fetch(`$/api/send`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -72,7 +72,7 @@ type ForecastApiResponse = {
 };
 
 export async function fetchProfile() {
-  const response = await fetch(`${API_BASE_URL}/api/profile`, {
+  const response = await fetch(`/api/profile`, {
     method: 'GET',
     credentials: 'include',
   });
@@ -89,7 +89,7 @@ export async function updateProfile(payload: {
   weight_kg: number;
   underlying_disease: string;
 }) {
-  const response = await fetch(`${API_BASE_URL}/api/profile`, {
+  const response = await fetch(`/api/profile`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -105,7 +105,7 @@ export async function updateProfile(payload: {
 }
 
 export async function getSession() {
-  const response = await fetch(`${API_BASE_URL}/api/session`, {
+  const response = await fetch(`/api/session`, {
     method: 'GET',
     credentials: 'include',
   });
@@ -144,7 +144,7 @@ export async function fetchForecast(payload: ForecastPayload) {
     body.meal_bucket = payload.meal_bucket;
   }
 
-  const response = await fetch(`${API_BASE_URL}/api/predict`, {
+  const response = await fetch(`/api/predict`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
