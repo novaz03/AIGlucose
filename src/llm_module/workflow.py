@@ -201,7 +201,7 @@ def ensure_user_health_profile(
         if not profile_path.exists():
             initial_payload = {
                 "age": None,
-                "gender": None,
+                "gender": "female",
                 "weight_kg": None,
                 "height_cm": None,
                 "underlying_disease": None,
