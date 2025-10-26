@@ -184,6 +184,10 @@ class ProfileUpdateItem(BaseModel):
         None,
         description="Cleaned value proposed for the profile field.",
     )
+    raw_value: Optional[str] = Field(
+        None,
+        description="Original value extracted from the user's update request.",
+    )
     explanation: Optional[str] = Field(
         None,
         description="Short rationale describing the change or missing data.",

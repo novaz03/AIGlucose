@@ -13,7 +13,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from ai_query_interface import AIQuery
+from ai_query_interface import (
+    PROFILE_UPDATE_PROMPT_CHOICE,
+    PROFILE_UPDATE_DETAILS_PROMPT_TEXT,
+    PROFILE_UPDATE_FOLLOWUP_PROMPT_TEXT,
+    AIQuery,
+)
 from src.llm_module import workflow
 from src.llm_module.models import (
     ConversationPrompts,
@@ -54,7 +59,79 @@ def test_ai_query_prefills_saved_health_profile(tmp_path, monkeypatch):
 
     assert not any(item[0] == "health" for item in query._questions)
     assert query._health_answers[:5] == ["25", "female", "60.0", "165.0", "type 1 diabetes"]
-    assert query._message_queue[-1].startswith("Using your saved health profile")
+    assert query._profile_is_complete is True
+    assert query._profile_update_state == PROFILE_UPDATE_PROMPT_CHOICE
+    assert query._profile_is_complete is True
+
+
+@pytest.mark.anyio
+async def test_ai_query_immediate_profile_update_flow(tmp_path):
+    storage_dir = tmp_path / "user_data"
+    profile = {
+        "age": 25,
+        "gender": "female",
+        "weight_kg": 58.0,
+        "height_cm": 165.0,
+        "underlying_disease": "type 1 diabetes",
+        "race": "asian",
+        "activity_level": "moderate",
+    }
+    write_profile(storage_dir, 88, profile)
+
+    query = AIQuery(88, storage_dir=storage_dir)
+
+    # Greeting
+    greeting = await query.Greeting()
+    assert "assistant" in greeting.lower()
+
+    # First prompt should be the profile update question
+    prompt = await query.QueryBody()
+    assert "review or update" in prompt.lower()
+
+    # User agrees to update
+    await query.ContinueQuery("yes")
+    # Message queue should contain the acknowledgement prior to the details prompt
+    follow_up = await query.QueryBody()
+    assert "great" in follow_up.lower()
+
+    next_prompt = await query.QueryBody()
+    assert PROFILE_UPDATE_DETAILS_PROMPT_TEXT.lower() in next_prompt.lower()
+
+    # LLM suggests updating weight with raw/accepted values
+    llm_payload = json.dumps(
+        {
+            "updates": [
+                {
+                    "question": "weight",
+                    "raw_value": "weight is 120 kg",
+                    "accepted_value": "120",
+                }
+            ]
+        }
+    )
+    query._client = StubClient(payload=llm_payload)
+
+    # User says weight is 120 kg
+    await query.ContinueQuery("weight is 120 kg")
+
+    # Confirmation messages should come next
+    updated_msg = await query.QueryBody()
+    assert "updated" in updated_msg.lower()
+    thanks_msgs = await query.QueryBody()
+    assert "thanks" in thanks_msgs.lower()
+
+    follow_up_prompt = await query.QueryBody()
+    assert PROFILE_UPDATE_FOLLOWUP_PROMPT_TEXT.lower() in follow_up_prompt.lower()
+
+    # User declines further updates
+    await query.ContinueQuery("no")
+    resume_prompt = await query.QueryBody()
+    assert "review or update" not in resume_prompt.lower()
+
+    # Weight should be updated and subsequent questions restored
+    assert query._health_answers[2] == "120.0"
+    assert query._profile_data["weight_kg"] == 120.0
+    assert query._questions
 
 
 def test_ai_query_prompts_when_profile_missing_required_fields(tmp_path):
@@ -71,7 +148,6 @@ def test_ai_query_prompts_when_profile_missing_required_fields(tmp_path):
     query = AIQuery(5, storage_dir=storage_dir)
 
     assert any(item[0] == "health" for item in query._questions)
-    assert not query._message_queue
 
 
 def test_build_user_prompt_contains_ingredient_guidance():

@@ -163,8 +163,10 @@ def build_profile_update_prompts(*, profile_json: str, user_request: str | None 
         - Each entry must set "question" to one of: age, gender, weight,
           height, underlying_disease, race, activity_level.
 
-        - Include "accepted_value" when the change is reasonable. Leave it null
-          if you need more information.
+        - Provide both "raw_value" (the user's exact wording) and, when the
+          update is acceptable, "accepted_value" as a cleaned string ready for
+          validation. Leave accepted_value null when additional clarification is
+          required.
 
         - The explanation must be concise (under 120 characters).
 

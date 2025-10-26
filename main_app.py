@@ -95,7 +95,19 @@ class App:
     async def _run_greeting(self):
         greeting = await self.query.Greeting()
         self._append_log(f"AI: {greeting}")
+        await self._drain_pending_ai_messages()
         self._enable_send()
+
+    async def _drain_pending_ai_messages(self):
+        if self.query is None:
+            return
+        while True:
+            body = await self.query.QueryBody()
+            if not body:
+                break
+            self._append_log(f"AI: {body}")
+            if not self.query or not getattr(self.query, "_message_queue", None):
+                break
 
     def _on_enter(self, event):
         if self.ai_busy:
@@ -122,6 +134,8 @@ class App:
             return
         body = await self.query.QueryBody()
         self._append_log(f"AI: {body}")
+        if self.query and getattr(self.query, "_message_queue", None):
+            await self._drain_pending_ai_messages()
         self._enable_send()
 
     async def _finish_query(self):

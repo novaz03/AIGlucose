@@ -15,7 +15,7 @@ from src.llm_module import (
     create_client,
     run_food_analysis_pipeline,
 )
-from src.llm_module.models import ProfileUpdateResponse
+from src.llm_module.models import ProfileUpdateItem, ProfileUpdateResponse
 from src.llm_module.responses import (
     build_input_validation_prompts,
     build_profile_update_prompts,
@@ -99,6 +99,19 @@ HEALTH_QUESTION_ORDER: list[str] = [
 ]
 
 
+QUESTION_SPEC_BY_KEY: dict[str, tuple[str, str, bool]] = {
+    key: (q_type, prompt, required)
+    for q_type, key, prompt, required in DEFAULT_QUESTION_SPECS
+}
+
+
+PROFILE_UPDATE_PROMPT_TEXT = "Would you like to review or update your saved health profile?"
+PROFILE_UPDATE_DETAILS_PROMPT_TEXT = (
+    "What would you like to update? You can mention fields like weight, height, or diagnosis."
+)
+PROFILE_UPDATE_FOLLOWUP_PROMPT_TEXT = "Would you like to update anything else in your saved health profile?"
+
+
 PROFILE_UPDATE_IDLE = "idle"
 PROFILE_UPDATE_PROMPT_CHOICE = "prompt_choice"
 PROFILE_UPDATE_AWAITING_DECISION = "awaiting_decision"
@@ -132,7 +145,10 @@ class AIQuery:
         self._message_queue: deque[str] = deque()
         self._profile_update_retry_message: Optional[str] = None
         self._profile_update_state: str = PROFILE_UPDATE_IDLE
+        self._profile_update_prompt_message: str = PROFILE_UPDATE_PROMPT_TEXT
         self._profile_data: dict[str, Any] = {}
+        self._profile_is_complete = False
+        self._stored_questions_post_prefill: deque[tuple[str, str, str, bool]] | None = None
 
         self._client = create_client("lmstudio")
         self._request_context = LLMRequestContext(model_name=DEFAULT_LMSTUDIO_MODEL)
@@ -342,13 +358,22 @@ class AIQuery:
         self._questions = combined_questions
 
         if missing_required:
+            missing_text = ", ".join(
+                self._format_field_label(field) for field in missing_required
+            )
+            self._message_queue.append(
+                "I still need updated information for: "
+                + missing_text
+                + ". Let's confirm these now."
+            )
             return
 
         if prefilled_fields:
-            self._message_queue.append(
-                "Using your saved health profile. Let me know if anything has changed."
-            )
+            self._profile_is_complete = True
+            self._stored_questions_post_prefill = combined_questions
+            self._questions = deque()
             self._profile_update_state = PROFILE_UPDATE_PROMPT_CHOICE
+            self._profile_update_prompt_message = PROFILE_UPDATE_PROMPT_TEXT
 
     def _store_prefilled_health_answer(self, key: str, value: str) -> None:
         if key in self._health_answer_index:
@@ -420,6 +445,15 @@ class AIQuery:
     def _format_field_label(field: str) -> str:
         return field.replace("_", " ")
 
+    def _ensure_first_prompt_ready(self) -> None:
+        if self._profile_is_complete:
+            return
+        if self._current_question is not None:
+            return
+        if not self._questions:
+            return
+        self._current_question = self._questions.popleft()
+
     def _validate_answer(self, key: str, value: str) -> tuple[bool, str, str]:
         if not value:
             field_label = key.replace("_", " ")
@@ -438,7 +472,7 @@ class AIQuery:
             try:
                 weight = float(value)
             except ValueError:
-                return False, "", "Please enter your weight as a number (e.g., 72.5)."
+                return False, "", "Please enter your weight as a number (e.g., 72 or 72.5)."
             if weight <= 0:
                 return False, "", "Weight must be a positive number."
             return True, self._format_required_float(weight), ""
@@ -518,19 +552,14 @@ class AIQuery:
         return f"I still need your {field_label} to continue."
 
     async def _maybe_handle_profile_update_response(self, user_input: str) -> bool:
-        if self._profile_update_state in {
-            PROFILE_UPDATE_IDLE,
-            PROFILE_UPDATE_CONFIRMATION,
-        }:
+        if self._profile_update_state == PROFILE_UPDATE_IDLE:
             return False
         handled = await self._handle_profile_update_response(user_input)
-        if handled and self._profile_update_state == PROFILE_UPDATE_CONFIRMATION:
-            if not self._message_queue:
-                self._message_queue.append("Thanks! Your profile is updated.")
         return handled
 
     async def _next_profile_update_prompt_if_needed(self) -> Optional[str]:
         if not self._should_prompt_profile_update():
+            self._ensure_first_prompt_ready()
             return None
         prompt = self._next_profile_update_prompt()
         if prompt is None:
@@ -538,14 +567,13 @@ class AIQuery:
         return prompt
 
     def _should_prompt_profile_update(self) -> bool:
-        if self._profile_update_state in {
-            PROFILE_UPDATE_IDLE,
-            PROFILE_UPDATE_CONFIRMATION,
-        }:
+        if self._profile_update_state == PROFILE_UPDATE_IDLE:
             return False
         if self._current_question is not None:
             return False
         if self._questions:
+            return False
+        if not self._profile_is_complete:
             return False
         return True
 
@@ -557,11 +585,11 @@ class AIQuery:
 
         if self._profile_update_state == PROFILE_UPDATE_PROMPT_CHOICE:
             self._profile_update_state = PROFILE_UPDATE_AWAITING_DECISION
-            return "Would you like to review or update your saved health profile?"
+            return self._profile_update_prompt_message
 
         if self._profile_update_state == PROFILE_UPDATE_REQUEST_DETAILS:
             self._profile_update_state = PROFILE_UPDATE_AWAITING_DETAILS
-            return "What would you like to update? You can mention fields like weight, height, or diagnosis."
+            return PROFILE_UPDATE_DETAILS_PROMPT_TEXT
 
         return None
 
@@ -577,12 +605,15 @@ class AIQuery:
         if self._profile_update_state == PROFILE_UPDATE_AWAITING_DECISION:
             if text in {"no", "not now", "skip", "n", "nope"}:
                 self._profile_update_state = PROFILE_UPDATE_IDLE
+                self._restore_post_update_questions()
+                if self._current_question is not None:
+                    self._message_queue.append(self._current_question[2])
                 self._message_queue.append("No problem. We'll continue with your saved details.")
-                return True
+                return await self._maybe_progress_after_message()
             if text in {"yes", "y", "sure", "update", "ok"}:
                 self._profile_update_state = PROFILE_UPDATE_REQUEST_DETAILS
                 self._message_queue.append("Great, let's revise your profile.")
-                return True
+                return await self._maybe_progress_after_message()
 
             self._profile_update_retry_message = "I didn't catch that. Please answer 'yes' or 'no'."
             return True
@@ -590,7 +621,7 @@ class AIQuery:
         if self._profile_update_state == PROFILE_UPDATE_AWAITING_DETAILS:
             success = await self._process_profile_update_request(user_input)
             if success:
-                self._profile_update_state = PROFILE_UPDATE_CONFIRMATION
+                return await self._maybe_progress_after_message()
             return True
 
         return False
@@ -606,6 +637,7 @@ class AIQuery:
             user_request=user_request,
         )
 
+        raw = None
         try:
             raw = await asyncio.to_thread(
                 self._client.complete,
@@ -614,35 +646,57 @@ class AIQuery:
                 system_prompt=system_prompt,
             )
         except Exception:
-            self._profile_update_retry_message = "I'm having trouble updating right now. Let's try again shortly."
-            return False
+            # We'll fall back to parsing the user's request directly
+            pass
 
-        try:
-            payload = json.loads(raw)
-        except json.JSONDecodeError:
-            self._profile_update_retry_message = "I couldn't interpret that update. Could you rephrase it?"
-            return False
+        updates: list[ProfileUpdateItem] = []
+        if raw:
+            try:
+                payload = json.loads(raw)
+                llm_response = ProfileUpdateResponse.parse_obj(payload)
+                updates = llm_response.updates
+            except Exception:
+                updates = []
 
-        try:
-            update_response = ProfileUpdateResponse.parse_obj(payload)
-        except Exception:
-            self._profile_update_retry_message = "I couldn't interpret that update. Could you rephrase it?"
-            return False
-
-        if not update_response.updates:
-            self._profile_update_retry_message = "I didn't see any valid changes. Could you provide more details?"
-            return False
+        if not updates:
+            # fallback to simple parsing from user_request
+            fallback = self._parse_fallback_update(user_request)
+            if fallback:
+                updates = [fallback]
+            else:
+                self._profile_update_retry_message = "I couldn't interpret that update. Could you rephrase it?"
+                return False
 
         applied_fields: list[str] = []
-        for item in update_response.updates:
+        for item in updates:
             key = item.question
             if key not in HEALTH_FIELD_MAPPING:
                 continue
 
-            normalized = item.accepted_value or ""
-            is_valid, cleaned_value, error_message = self._validate_answer(key, normalized)
-            if not is_valid:
-                self._profile_update_retry_message = error_message or "That value didn't look right. Could you provide it again?"
+            raw_value = (item.raw_value or "").strip()
+            normalized_value = (item.accepted_value or raw_value).strip()
+
+            spec = QUESTION_SPEC_BY_KEY.get(key)
+            if spec is None:
+                continue
+            q_type, prompt_text, required = spec
+
+            evaluation = await self._evaluate_answer(
+                key=key,
+                prompt_text=prompt_text,
+                user_input=normalized_value,
+                required=required,
+            )
+
+            if evaluation.ask_again:
+                self._profile_update_retry_message = evaluation.explanation or "That value didn't look right. Could you provide it again?"
+                if evaluation.next_question:
+                    self._profile_update_retry_message += f" {evaluation.next_question}"
+                return False
+
+            cleaned_value = evaluation.accepted_value or normalized_value
+            if not cleaned_value:
+                self._profile_update_retry_message = f"Please provide your {self._format_field_label(key)}."
                 return False
 
             self._apply_health_update(key, cleaned_value)
@@ -654,8 +708,38 @@ class AIQuery:
 
         self._persist_profile_updates()
         applied_labels = ", ".join(self._format_field_label(field) for field in applied_fields)
-        self._message_queue.append(f"Updated: {applied_labels}.")
-        return True
+        self._profile_update_state = PROFILE_UPDATE_PROMPT_CHOICE
+        self._profile_update_prompt_message = PROFILE_UPDATE_FOLLOWUP_PROMPT_TEXT
+        self._profile_update_retry_message = None
+        self._message_queue.append("Updated: " + applied_labels + ".")
+        return await self._maybe_progress_after_message()
+
+    async def _maybe_progress_after_message(self) -> bool:
+        appended_follow_up = False
+
+        if not self._message_queue:
+            prompt = await self._next_profile_update_prompt_if_needed()
+            if prompt is not None:
+                self._message_queue.append(prompt)
+                appended_follow_up = True
+
+        if self._message_queue:
+            return True
+
+        return appended_follow_up
+
+    def _parse_fallback_update(self, user_request: str) -> Optional[ProfileUpdateItem]:
+        lowered = user_request.lower()
+        for key in HEALTH_FIELD_MAPPING:
+            if key in lowered:
+                digits = "".join(ch for ch in lowered if ch.isdigit() or ch == ".")
+                if digits:
+                    return ProfileUpdateItem(
+                        question=key,
+                        raw_value=user_request.strip(),
+                        accepted_value=digits,
+                    )
+        return None
 
     def _apply_health_update(self, key: str, cleaned_value: str) -> None:
         mapped = HEALTH_FIELD_MAPPING.get(key, key)
@@ -686,3 +770,14 @@ class AIQuery:
         profile_path.parent.mkdir(parents=True, exist_ok=True)
         with profile_path.open("w", encoding="utf-8") as fh:
             json.dump(self._profile_data, fh, indent=2, default=str)
+
+    def _restore_post_update_questions(self) -> None:
+        if not self._profile_is_complete:
+            return
+        if self._stored_questions_post_prefill is None:
+            return
+        if self._questions:
+            return
+        self._questions = deque(self._stored_questions_post_prefill)
+        if self._current_question is None and self._questions:
+            self._current_question = self._questions.popleft()
