@@ -153,13 +153,14 @@ function ChatPageContent() {
 
     const initializeChat = async () => {
       setIsLoading(true);
+      let uid: string | null = null;
 
       try {
         const currentUserId = await getSession();
         if (cancelled) {
           return;
         }
-        const uid = String(currentUserId);
+        uid = String(currentUserId);
         setUserId(uid);
         setSessionError(null);
 
