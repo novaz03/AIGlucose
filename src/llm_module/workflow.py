@@ -23,7 +23,7 @@ from .question_bank import (
     REQUIRED_HEALTH_KEYS,
     iter_health_question_specs,
 )
-from .responses import build_system_prompt, build_user_prompt
+from .responses import build_system_prompt, build_user_prompt, FOOD_ANALYSIS_SCHEMA
 
 
 DEFAULT_LMSTUDIO_MODEL = "openai/gpt-oss-20b"
@@ -108,6 +108,9 @@ class LLMOrchestrator:
 
         system_prompt = build_system_prompt()
         user_prompt = build_user_prompt(context_json=context_json)
+
+        # Set up structured output format
+        request_context.response_format = FOOD_ANALYSIS_SCHEMA
 
         return self._client.generate_structured(
             prompt=user_prompt,

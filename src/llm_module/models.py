@@ -142,6 +142,9 @@ class LLMRequestContext(BaseModel):
     extra_options: Dict[str, object] = Field(
         default_factory=dict, description="Additional provider kwargs"
     )
+    response_format: Optional[Dict[str, object]] = Field(
+        None, description="JSON schema for structured output format"
+    )
 
 
 class QuestionEvaluation(BaseModel):
@@ -198,5 +201,9 @@ class ProfileUpdateResponse(BaseModel):
     """Array wrapper describing proposed profile updates."""
 
     updates: List[ProfileUpdateItem] = Field(default_factory=list)
+    should_ask_again: bool = Field(
+        default=False,
+        description="Whether to ask the user for clarification before proceeding"
+    )
 
 

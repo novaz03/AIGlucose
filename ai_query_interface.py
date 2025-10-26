@@ -602,11 +602,13 @@ class AIQuery:
             pass
 
         updates: list[ProfileUpdateItem] = []
+        should_ask_again = False
         if raw:
             try:
                 payload = json.loads(strip_json_code_fence(raw))
                 llm_response = ProfileUpdateResponse.parse_obj(payload)
                 updates = llm_response.updates
+                should_ask_again = llm_response.should_ask_again
             except Exception:
                 updates = []
 
@@ -618,6 +620,11 @@ class AIQuery:
             else:
                 self._profile_update_retry_message = "I couldn't interpret that update. Could you rephrase it?"
                 return False
+
+        # If the LLM indicates we should ask again, set retry message and return False
+        if should_ask_again:
+            self._profile_update_retry_message = "Could you please provide more details or clarify your request?"
+            return False
 
         applied_fields: list[str] = []
         for item in updates:
@@ -631,7 +638,10 @@ class AIQuery:
             spec = QUESTION_SPEC_BY_KEY.get(key)
             if spec is None:
                 continue
-            q_type, prompt_text, required = spec
+            # QuestionSpec has 4 fields: category, key, prompt, required
+            # We need: prompt_text (prompt), required
+            prompt_text = spec.prompt
+            required = spec.required
 
             if item.accepted_value:
                 cleaned_value = normalized_value

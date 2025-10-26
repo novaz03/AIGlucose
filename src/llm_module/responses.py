@@ -8,11 +8,75 @@ from textwrap import dedent
 from .models import FoodAnalysisResponse, ProfileUpdateResponse, QuestionEvaluation
 
 
+# JSON schema for structured outputs
+FOOD_ANALYSIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "food": {
+            "type": "object",
+            "properties": {
+                "food_name": {"type": "string"},
+                "portion_description": {"type": "string"},
+                "portion_weight_g": {"type": "number"},
+                "ingredients": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "amount_g": {"type": "number"}
+                        },
+                        "required": ["name", "amount_g"]
+                    }
+                }
+            },
+            "required": ["food_name", "ingredients"]
+        },
+        "notes": {"type": "string"}
+    },
+    "required": ["food"]
+}
+
 LLM_STUDIO_RESPONSE_SCHEMA = json.dumps(
     FoodAnalysisResponse.model_json_schema(),
     indent=2,
 )
 
+
+# JSON schema for question evaluation
+QUESTION_EVALUATION_SCHEMA_DICT = {
+    "type": "object",
+    "properties": {
+        "question": {"type": "string"},
+        "ask_again": {"type": "boolean"},
+        "accepted_value": {"type": "string"},
+        "explanation": {"type": "string"},
+        "next_question": {"type": "string"}
+    },
+    "required": ["question", "ask_again"]
+}
+
+# JSON schema for profile updates
+PROFILE_UPDATE_SCHEMA_DICT = {
+    "type": "object",
+    "properties": {
+        "updates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "question": {"type": "string"},
+                    "accepted_value": {"type": "string"},
+                    "raw_value": {"type": "string"},
+                    "explanation": {"type": "string"}
+                },
+                "required": ["question"]
+            }
+        },
+        "should_ask_again": {"type": "boolean"}
+    },
+    "required": ["updates", "should_ask_again"]
+}
 
 QUESTION_EVALUATION_SCHEMA = json.dumps(
     QuestionEvaluation.model_json_schema(),
@@ -31,22 +95,17 @@ def build_system_prompt() -> str:
 
     return dedent(
         """
-        You are a diabetes meal planning assistant. Always answer with JSON only.
-        The JSON must conform to the schema provided. Do not include extra keys.
+        You are a diabetes meal planning assistant. Analyze the user's request and provide a structured response.
         """
     ).strip()
 
 
 def build_user_prompt(*, context_json: str) -> str:
-    """Embed the schema and context into the user prompt."""
+    """Embed the context into the user prompt."""
 
     return dedent(
         f"""
-        Use the following JSON schema as a strict contract for your response:
-
-        {LLM_STUDIO_RESPONSE_SCHEMA}
-
-        Below is the user context you must consider when filling the schema:
+        Below is the user context you must consider:
 
         {context_json}
 
@@ -54,8 +113,6 @@ def build_user_prompt(*, context_json: str) -> str:
         - When the user gives only a food, dish, or course name, infer a plausible set of ingredients and provide realistic estimated weights in grams for each ingredient that align with the portion described.
         - When the user already supplies ingredient details, normalise them and ensure each ingredient entry includes an estimated weight in grams.
         Always populate `food.ingredients` with at least one ingredient entry and ensure weights are non-negative numbers.
-
-        Respond with JSON that matches the schema exactly.
         """
     ).strip()
 
@@ -168,6 +225,10 @@ def build_profile_update_prompts(*, profile_json: str, user_request: str | None 
           validation. Leave accepted_value null when additional clarification is
           required.
 
+        - Set "should_ask_again" to true if the user's request is unclear,
+          ambiguous, or needs clarification. Set to false if the request is
+          clear and can be processed.
+
         - The explanation must be concise (under 120 characters).
 
         User's update request (verbatim): {user_request_literal}
@@ -180,6 +241,9 @@ def build_profile_update_prompts(*, profile_json: str, user_request: str | None 
 
 
 __all__ = [
+    "FOOD_ANALYSIS_SCHEMA",
+    "QUESTION_EVALUATION_SCHEMA_DICT",
+    "PROFILE_UPDATE_SCHEMA_DICT",
     "LLM_STUDIO_RESPONSE_SCHEMA",
     "QUESTION_EVALUATION_SCHEMA",
     "build_system_prompt",

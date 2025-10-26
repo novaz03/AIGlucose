@@ -47,6 +47,10 @@ class LMStudioClient(LLMClientBase):
             "messages": messages,
             **request_context.extra_options,
         }
+        
+        # Add response_format if provided
+        if request_context.response_format:
+            payload["response_format"] = request_context.response_format
 
         try:
             response = self._session.post(
