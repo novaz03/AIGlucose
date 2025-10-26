@@ -51,31 +51,24 @@ QUESTION_EVALUATION_SCHEMA_DICT = {
         "ask_again": {"type": "boolean"},
         "accepted_value": {"type": "string"},
         "explanation": {"type": "string"},
-        "next_question": {"type": "string"}
+        "next_question": {"type": "string"},
+        "invalid_type": {"type": "string", "enum": ["unclear_question", "invalid_value"]}
     },
-    "required": ["question", "ask_again"]
+    "required": ["question", "ask_again", "accepted_value", "explanation", "next_question"]
 }
 
 # JSON schema for profile updates
 PROFILE_UPDATE_SCHEMA_DICT = {
     "type": "object",
     "properties": {
-        "updates": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "question": {"type": "string"},
-                    "accepted_value": {"type": "string"},
-                    "raw_value": {"type": "string"},
-                    "explanation": {"type": "string"}
-                },
-                "required": ["question"]
-            }
-        },
-        "should_ask_again": {"type": "boolean"}
+        "question": {"type": "string"},
+        "ask_again": {"type": "boolean"},
+        "accepted_value": {"type": "string"},
+        "explanation": {"type": "string"},
+        "next_question": {"type": "string"},
+        "raw_value": {"type": "string"}
     },
-    "required": ["updates", "should_ask_again"]
+    "required": ["question", "ask_again", "accepted_value", "explanation", "next_question", "raw_value"]
 }
 
 QUESTION_EVALUATION_SCHEMA = json.dumps(
@@ -159,6 +152,11 @@ def build_input_validation_prompts(
         - next_question: When ask_again is true, provide a short, clear rephrasing
           to use the next time we ask the user. Address the issue of of user's original response.
           Provide a clear instruction on how to answer the question.
+        - invalid_type: When ask_again is true, specify the type of validation issue:
+          "unclear_question" when the user doesn't understand what's being asked (e.g., 
+          "what should I enter?", "how do I answer this?"), or "invalid_value" when the 
+          user understands the question but provided an invalid answer (e.g., negative 
+          number for age, non-numeric value for weight).
 
         Validation guidance:
         1. Numbers must be positive (age, weight, height, current_glucose_mg_dl) 
@@ -175,8 +173,10 @@ def build_input_validation_prompts(
 
         Examples:
         - Question: "age", User answer: "34" -> ask_again false, accepted_value "34".
-        - Question: "weight", User answer: "-10" -> ask_again true, next_question
-          "Please share your weight in kilograms as a positive number."
+        - Question: "weight", User answer: "-10" -> ask_again true, invalid_type "invalid_value", 
+          next_question "Please share your weight in kilograms as a positive number."
+        - Question: "age", User answer: "what should I enter?" -> ask_again true, 
+          invalid_type "unclear_question", next_question "Please provide your age as a number."
         - Question: "desired_food", User answer: "burger" -> ask_again false,
           accepted_value "burger".
 
@@ -221,9 +221,9 @@ def build_profile_update_prompts(*, profile_json: str, user_request: str | None 
           height, underlying_disease, race, activity_level.
 
         - Provide both "raw_value" (the user's exact wording) and, when the
-          update is acceptable, "accepted_value" as a cleaned string ready for
-          validation. Leave accepted_value null when additional clarification is
-          required.
+          update is acceptable, "accepted_value" as a cleaned value ready for
+          validation this value should make sense in the context of the question. 
+          Leave accepted_value null when additional clarification is required.
 
         - Set "should_ask_again" to true if the user's request is unclear,
           ambiguous, or needs clarification. Set to false if the request is

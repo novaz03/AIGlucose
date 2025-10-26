@@ -489,10 +489,21 @@ class AIQuery:
         return evaluation
 
     def _build_retry_message(self, key: str, evaluation: QuestionEvaluation) -> str:
-        if evaluation.explanation:
-            return evaluation.explanation
-        field_label = key.replace("_", " ")
-        return f"I still need your {field_label} to continue."
+        if evaluation.invalid_type == "unclear_question":
+            # Just show the next_question (rephrased question)
+            return evaluation.next_question if evaluation.next_question else evaluation.explanation or f"Please provide your {key.replace('_', ' ')}."
+        elif evaluation.invalid_type == "invalid_value":
+            # Acknowledge the parameter and explain the issue
+            field_label = key.replace("_", " ")
+            ack = f"I understand you're providing your {field_label}."
+            explanation = evaluation.explanation or "That value doesn't look right."
+            return f"{ack} {explanation}"
+        else:
+            # Fallback to current behavior
+            if evaluation.explanation:
+                return evaluation.explanation
+            field_label = key.replace("_", " ")
+            return f"I still need your {field_label} to continue."
 
     async def _maybe_handle_profile_update_response(self, user_input: str) -> bool:
         if self._profile_update_state == PROFILE_UPDATE_IDLE:
@@ -523,7 +534,7 @@ class AIQuery:
     def _next_profile_update_prompt(self) -> Optional[str]:
         if self._profile_update_retry_message:
             message = self._profile_update_retry_message
-            self._profile_update_retry_message = None
+            # Don't clear the retry message here - it will be cleared when the user responds
             return message
 
         if self._profile_update_state == PROFILE_UPDATE_PROMPT_CHOICE:
@@ -532,9 +543,7 @@ class AIQuery:
             return prompt_message
 
         if self._profile_update_state == PROFILE_UPDATE_REQUEST_DETAILS:
-            self._profile_update_state = PROFILE_UPDATE_AWAITING_DETAILS
-            self._message_queue.append("Great, let's revise your profile.")
-            self._message_queue.append(PROFILE_UPDATE_DETAILS_PROMPT_TEXT)
+            # This state should no longer be used since we transition directly to AWAITING_DETAILS
             return None
 
         return None
@@ -560,7 +569,7 @@ class AIQuery:
                     self._message_queue.append(next_prompt)
                 return await self._maybe_progress_after_message()
             if text in {"yes", "y", "sure", "update", "ok"}:
-                self._profile_update_state = PROFILE_UPDATE_REQUEST_DETAILS
+                self._profile_update_state = PROFILE_UPDATE_AWAITING_DETAILS
                 prompt = PROFILE_UPDATE_DETAILS_PROMPT_TEXT
                 self._message_queue.append("Great, let's revise your profile.")
                 self._message_queue.append(prompt)
@@ -571,9 +580,12 @@ class AIQuery:
             return await self._maybe_progress_after_message()
 
         if self._profile_update_state == PROFILE_UPDATE_AWAITING_DETAILS:
+            # Clear any existing retry message since user is responding
+            self._profile_update_retry_message = None
             success = await self._process_profile_update_request(user_input)
             if success:
                 return await self._maybe_progress_after_message()
+            # If processing failed, we should stay in the same state to show retry message
             return True
 
         return False

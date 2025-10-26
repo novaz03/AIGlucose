@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -176,6 +176,10 @@ class QuestionEvaluation(BaseModel):
             "Suggested follow-up phrasing to use if the question needs to be asked"
             " again."
         ),
+    )
+    invalid_type: Optional[Literal["unclear_question", "invalid_value"]] = Field(
+        None,
+        description="Type of validation issue: unclear_question when user doesn't understand the question, invalid_value when the answer is invalid"
     )
 
 
