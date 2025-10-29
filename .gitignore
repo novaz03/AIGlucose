@@ -9,3 +9,4 @@ user_data/
 node_modules/
 server.log
 pred_outputs/
+*.docx
