@@ -10,3 +10,4 @@ node_modules/
 server.log
 pred_outputs/
 *.docx
+prediction_modelling/CGMacros
